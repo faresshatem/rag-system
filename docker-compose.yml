@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # 1. Qdrant Vector Database (For Dense, Sparse BM25, and RRF)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: agentic_qdrant
+    ports:
+      - "6333:6333" # REST API
+      - "6334:6334" # gRPC
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
+  # 2. Redis (For LangGraph State Checkpointing & Async Queues)
+  redis:
+    image: redis:alpine
+    container_name: agentic_redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  qdrant_storage:
+  redis_data:
