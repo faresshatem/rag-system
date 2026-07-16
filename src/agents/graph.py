@@ -39,7 +39,7 @@ def build_graph():
 if __name__ == "__main__":
     app = build_graph()
     
-    config = {"configurable": {"thread_id": "test_session_123"}}
+    config = {"configurable": {"thread_id": "test_session_12"}}
     
     initial_state = {
         "messages": [{"role": "user", "content": "I need to know my allowed remote days and check my laptop request status."}],
