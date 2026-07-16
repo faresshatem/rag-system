@@ -31,6 +31,22 @@ services:
     depends_on:
       - redis
 
+  # Structured Data & RBAC Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: rag_structured_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./src/database/init-scripts:/docker-entrypoint-initdb.d
+
 volumes:
   qdrant_storage:
   redis_data:
+  pgdata:
