@@ -64,7 +64,9 @@ class DenseSearch:
         Returns:
             str: Formatted query.
         """
-        return f"query: {query}"
+        formatted_query = f"query: {query}"
+        logger.debug("Formatted query: %s", formatted_query)
+        return formatted_query
 
     def _build_filter(self, domain: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Optional[Filter]:
         """
@@ -81,12 +83,16 @@ class DenseSearch:
 
         if domain:
             conditions.append(FieldCondition(key="domain", match=MatchValue(value=domain)))
+            logger.debug("Added domain filter: %s", domain)
 
         if metadata:
             for key, value in metadata.items():
                 conditions.append(FieldCondition(key=key, match=MatchValue(value=value)))
+                logger.debug("Added metadata filter: %s = %s", key, value)
 
-        return Filter(must=conditions) if conditions else None
+        filter_object = Filter(must=conditions) if conditions else None
+        logger.debug("Built filter: %s", filter_object)
+        return filter_object
 
     def search(self, query: str, domain: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, top_k: Optional[int] = None) -> List[SearchResult]:
         """
@@ -137,17 +143,21 @@ class DenseSearch:
             raise
 
 
-# Initialize DenseSearch
-dense_search = DenseSearch(qdrant_url="http://localhost:6333", collection_name="my_collection", top_k=5)
+try:
+    # Initialize DenseSearch
+    dense_search = DenseSearch(qdrant_url="http://localhost:6333", collection_name="my_collection", top_k=5)
 
-# Perform a search
-results = dense_search.search(
-    query="What are the HR policies for remote work?",
-    domain="HR",
-    metadata={"policy_type": "remote_work"},
-    top_k=3
-)
+    # Perform a search
+    results = dense_search.search(
+        query="What are the HR policies for remote work?",
+        domain="HR",
+        metadata={"policy_type": "remote_work"},
+        top_k=3
+    )
 
-# Print results
-for result in results:
-    print(result)
+    # Print results
+    for result in results:
+        print(result)
+
+except Exception as e:
+    logger.error("An error occurred during the dense search: %s", str(e))
