@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv, find_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_ollama import ChatOllama
 
 load_dotenv(find_dotenv())
@@ -13,13 +13,13 @@ def get_llm(use_local: bool = False, temperature: float = 0.0):
             temperature=temperature,
         )
     else:
-        api_key = os.getenv("GOOGLE_API_KEY")
+        api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY is not set in the environment variables.")
+            raise ValueError("GROQ_API_KEY is not set in the environment variables.")
             
-        return ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash-lite", 
-            google_api_key=api_key,
+        return ChatGroq(
+            model_name="llama-3.3-70b-versatile", 
+            groq_api_key=api_key,
             temperature=temperature,
         )
 
