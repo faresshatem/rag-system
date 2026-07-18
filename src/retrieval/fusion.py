@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Any
 from dataclasses import dataclass
 import logging
 
@@ -15,19 +15,13 @@ class SearchResult:
     score: float
     payload: Dict[str, any]
 
+@dataclass
 class ReciprocalRankFusion:
     """
     Implements Reciprocal Rank Fusion (RRF) for combining results from multiple retrieval methods.
     """
 
-    def __init__(self, k: int = 60):
-        """
-        Initialize the Reciprocal Rank Fusion instance.
-
-        Args:
-            k (int): The rank normalization factor for RRF. Default is 60.
-        """
-        self.k = k
+    k: int = 60  # Rank normalization factor
 
     def fuse(self, dense_results: List[SearchResult], sparse_results: List[SearchResult]) -> List[SearchResult]:
         """
@@ -43,9 +37,14 @@ class ReciprocalRankFusion:
         try:
             logger.info("Starting Reciprocal Rank Fusion with k=%d.", self.k)
 
-            # Create a dictionary to store cumulative scores and preserve payloads
+            # Validate inputs
+            if not dense_results and not sparse_results:
+                logger.warning("No results provided for fusion.")
+                return []
+
+            # Create a dictionary to store cumulative scores
             fused_scores: Dict[str, float] = {}
-            result_payloads: Dict[str, Dict[str, any]] = {}
+            result_payloads: Dict[str, Dict[str, Any]] = {}
 
             # Process dense results
             self._update_scores(fused_scores, result_payloads, dense_results, "dense")
@@ -73,7 +72,7 @@ class ReciprocalRankFusion:
     def _update_scores(
         self,
         fused_scores: Dict[str, float],
-        result_payloads: Dict[str, Dict[str, any]],
+        result_payloads: Dict[str, Dict[str, Any]],
         results: List[SearchResult],
         source: str,
     ) -> None:
@@ -82,7 +81,7 @@ class ReciprocalRankFusion:
 
         Args:
             fused_scores (Dict[str, float]): Dictionary to store cumulative scores.
-            result_payloads (Dict[str, Dict[str, any]]): Dictionary to store result payloads.
+            result_payloads (Dict[str, Dict[str, Any]]): Dictionary to store result payloads.
             results (List[SearchResult]): Results from a retrieval source.
             source (str): Source of the results (e.g., "dense" or "sparse").
         """
@@ -105,14 +104,14 @@ class ReciprocalRankFusion:
             )
 
     def _remove_duplicates(
-        self, fused_scores: Dict[str, float], result_payloads: Dict[str, Dict[str, any]]
+        self, fused_scores: Dict[str, float], result_payloads: Dict[str, Dict[str, Any]]
     ) -> List[SearchResult]:
         """
         Remove duplicate results based on chunk_id while preserving the highest score.
 
         Args:
             fused_scores (Dict[str, float]): Dictionary of cumulative scores.
-            result_payloads (Dict[str, Dict[str, any]]): Dictionary of result payloads.
+            result_payloads (Dict[str, Dict[str, Any]]): Dictionary of result payloads.
 
         Returns:
             List[SearchResult]: Deduplicated list of SearchResult objects.
