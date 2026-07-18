@@ -1,8 +1,8 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import ScoredPoint
+from qdrant_client.http.models import ScoredPoint, Filter, FieldCondition, MatchValue
 import logging
 import os
 
@@ -21,66 +21,126 @@ class DenseSearch:
     A class to perform dense vector search using Qdrant and SentenceTransformer.
     """
 
-    def __init__(self, qdrant_url: str = "http://localhost:6333", collection_name: str = None):
+    def __init__(self, qdrant_url: str = "http://localhost:6333", collection_name: Optional[str] = None, top_k: int = 10):
         """
         Initialize the DenseSearch instance.
 
         Args:
             qdrant_url (str): The URL of the Qdrant instance.
             collection_name (str): The name of the Qdrant collection to search.
+            top_k (int): Number of top results to retrieve.
         """
         self.qdrant_url = qdrant_url
         self.collection_name = collection_name or os.getenv("QDRANT_COLLECTION_NAME")
+        self.top_k = top_k
+
         if not self.collection_name:
             raise ValueError("Collection name must be provided or set in the environment variable 'QDRANT_COLLECTION_NAME'.")
-        
-        self.qdrant_client = QdrantClient(url=self.qdrant_url)
-        self.model = SentenceTransformer("all-MiniLM-L6-v2")  # Use a lightweight SentenceTransformer model
 
-    def search_dense(self, query: str, target_domain: str, top_k: int = 5) -> List[SearchResult]:
+        try:
+            self.qdrant_client = QdrantClient(url=self.qdrant_url)
+            logger.info("Successfully connected to Qdrant at %s", self.qdrant_url)
+        except Exception as e:
+            logger.error("Failed to connect to Qdrant: %s", str(e))
+            raise
+
+        try:
+            self.model = SentenceTransformer("intfloat/multilingual-e5-base")
+            logger.info("Loaded embedding model: intfloat/multilingual-e5-base")
+        except Exception as e:
+            logger.error("Failed to load embedding model: %s", str(e))
+            raise
+
+    def _format_query(self, query: str) -> str:
         """
-        Perform a dense vector search on the Qdrant collection.
+        Format the user query according to E5 rules.
 
         Args:
-            query (str): The query string to search for.
-            target_domain (str): The domain to filter results by.
-            top_k (int): The number of top results to return.
+            query (str): The user query.
 
         Returns:
-            List[SearchResult]: A list of search results containing id, score, and payload.
+            str: Formatted query.
+        """
+        return f"query: {query}"
+
+    def _format_document(self, document: str) -> str:
+        """
+        Format the document text according to E5 rules.
+
+        Args:
+            document (str): The document text.
+
+        Returns:
+            str: Formatted document.
+        """
+        return f"passage: {document}"
+
+    def _build_filter(self, domain: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Optional[Filter]:
+        """
+        Build a Qdrant filter for domain and metadata-based filtering.
+
+        Args:
+            domain (str): The domain to filter by.
+            metadata (Dict[str, Any]): Additional metadata filters.
+
+        Returns:
+            Filter: Qdrant filter object.
+        """
+        conditions = []
+
+        if domain:
+            conditions.append(FieldCondition(key="domain", match=MatchValue(value=domain)))
+
+        if metadata:
+            for key, value in metadata.items():
+                conditions.append(FieldCondition(key=key, match=MatchValue(value=value)))
+
+        return Filter(must=conditions) if conditions else None
+
+    def search(self, query: str, domain: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, top_k: Optional[int] = None) -> List[SearchResult]:
+        """
+        Perform a dense vector search.
+
+        Args:
+            query (str): The user query.
+            domain (str): The domain to filter by.
+            metadata (Dict[str, Any]): Additional metadata filters.
+            top_k (int): Number of top results to retrieve.
+
+        Returns:
+            List[SearchResult]: List of search results.
         """
         try:
-            # Generate query embedding
-            logger.info("Generating embedding for the query.")
-            query_embedding = self.model.encode(query).tolist()
+            formatted_query = self._format_query(query)
+            query_vector = self.model.encode(formatted_query, normalize_embeddings=True)
+            logger.info("Query vector generated successfully.")
 
-            # Perform search in Qdrant
-            logger.info("Performing search in Qdrant.")
-            search_results = self.qdrant_client.search(
+            search_filter = self._build_filter(domain, metadata)
+            top_k = top_k or self.top_k
+
+            results = self.qdrant_client.search(
                 collection_name=self.collection_name,
-                query_vector=query_embedding,
-                query_filter={
-                    "must": [
-                        {
-                            "key": "domain",
-                            "match": {"value": target_domain}
-                        }
-                    ]
-                },
+                query_vector=query_vector,
+                query_filter=search_filter,
                 limit=top_k
             )
 
-            # Process and return results
-            logger.info("Processing search results.")
+            logger.info("Search completed successfully with %d results.", len(results))
             return [
                 SearchResult(
                     id=result.id,
                     score=result.score,
-                    payload=result.payload
+                    payload={
+                        "chunk_id": result.payload.get("chunk_id"),
+                        "document_name": result.payload.get("document_name"),
+                        "text": result.payload.get("text"),
+                        "domain": result.payload.get("domain"),
+                        "metadata": result.payload.get("metadata"),
+                    },
                 )
-                for result in search_results
+                for result in results
             ]
 
         except Exception as e:
-            logger.error(f"An error occurred during dense search: {e}")
-            raise RuntimeError("Failed to perform dense search.") from e
+            logger.error("Search failed: %s", str(e))
+            raise
