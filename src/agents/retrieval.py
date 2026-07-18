@@ -236,7 +236,51 @@ class RetrievalAgent:
         Returns:
             AgentState: The updated agent state with the summary.
         """
-        # Example: Combine text from chunks into a summary
-        summary = " ".join(chunk.text for chunk in chunks)
-        agent_state.result_summary = summary
-        return agent_state
+        try:
+            logger.info("Generating smart summary for %d chunks.", len(chunks))
+
+            if not chunks:
+                logger.warning("No chunks provided for summarization.")
+                agent_state.result_summary = "No content available for summarization."
+                return agent_state
+
+            # Combine text from chunks into a single summary
+            combined_text = " ".join(chunk.text for chunk in chunks)
+
+            # Check if the combined text exceeds the context window
+            context_window = agent_state.current_task.context_window
+            if len(combined_text) > context_window:
+                logger.info("Combined text exceeds context window. Summarizing content.")
+                # Example summarization logic (replace with actual summarization model if available)
+                summary = self._summarize_text(combined_text)
+            else:
+                summary = combined_text
+
+            # Add citations for each chunk
+            citations = [
+                f"[{chunk.document_name} - {chunk.chunk_id}]"
+                for chunk in chunks
+            ]
+            summary_with_citations = f"{summary}\n\nCitations:\n" + "\n".join(citations)
+
+            # Update the agent state with the summary
+            agent_state.result_summary = summary_with_citations
+            logger.info("Smart summary generated successfully.")
+            return agent_state
+
+        except Exception as e:
+            logger.error("Failed to generate smart summary: %s", str(e))
+            raise
+
+    def _summarize_text(self, text: str) -> str:
+        """
+        Summarize the given text. This is a placeholder for an actual summarization model.
+
+        Args:
+            text (str): The text to summarize.
+
+        Returns:
+            str: The summarized text.
+        """
+        # Placeholder logic: Return the first 500 characters as a summary
+        return text[:500] + "..."
