@@ -41,7 +41,12 @@ def query_planning_node(state: AgentState) -> dict:
         3. CONTEXTUAL REWRITING: The `description` of each task must be explicit.
         4. DYNAMIC REPLANNING: If you see previous 'Completed Tasks' that failed or changed the context, adjust your new plan accordingly.
         5. If all logical tasks are done based on the History, set intent to 'ready_for_synthesis' and leave the plan empty.
-        
+        INTENT CLASSIFICATION AND TASK RULES:
+        1. "information_retrieval": Use this ONLY if the user is asking for specific internal company data, IT tickets, HR leave balances, or company policies.
+        2. "casual_chat": Use this for greetings (e.g., "hi", "how are you"), small talk, AND general world knowledge questions (e.g., "tell me about AI", "what is Python?"). 
+
+        CRITICAL CONSTRAINT for 'casual_chat':
+        If the query intent is "casual_chat", you MUST return an EMPTY tasks list ([]). DO NOT create any tasks for general knowledge or casual conversations.
         Completed Tasks History:
         {history}
         """),

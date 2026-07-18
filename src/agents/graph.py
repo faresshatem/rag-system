@@ -119,7 +119,7 @@ async def main():
     print(f"Starting new chat session with thread_id: {session_id}")
     
     initial_state = {
-        "messages": [{"role": "user", "content": "If my IT ticket for 'Access to Production DB' is marked as 'RESOLVED', check my leave balance. If it is still 'OPEN', search the HR policy for rules on applying for a system access extension."}],
+        "messages": [{"role": "user", "content": "hi , how are you ? tell me about ai"}],
         "allowed_domains": ["HR","IT"],
         "step_count": 0,
         "tasks": []
