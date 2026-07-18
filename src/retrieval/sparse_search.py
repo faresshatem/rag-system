@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from rank_bm25 import BM25Okapi
 from dataclasses import dataclass
 from pydantic import BaseModel, Field
@@ -13,16 +13,18 @@ class Document:
     """
     Represents a document with text and metadata.
     """
+    id: str
     text: str
     metadata: Dict[str, Any]
 
-class QueryResult(BaseModel):
+@dataclass
+class SearchResult:
     """
-    Represents a query result with text, metadata, and score.
+    Represents a search result with id, score, and payload.
     """
-    text: str = Field(..., description="The text content of the document.")
-    metadata: Dict[str, Any] = Field(..., description="The metadata associated with the document.")
-    score: float = Field(..., description="The BM25 score of the document.")
+    id: str
+    score: float
+    payload: Dict[str, Any]
 
 class SparseSearch:
     """
@@ -35,6 +37,23 @@ class SparseSearch:
         """
         self.bm25 = None
         self.documents: List[Document] = []
+        self.tokenized_corpus: List[List[str]] = []
+
+    def index_documents(self, documents: List[Document]) -> None:
+        """
+        Indexes the given documents for BM25 retrieval.
+
+        Args:
+            documents (List[Document]): A list of documents to index.
+        """
+        try:
+            self.documents = documents
+            self.tokenized_corpus = self.tokenize_documents(documents)
+            self.bm25 = BM25Okapi(self.tokenized_corpus)
+            logger.info("Successfully indexed %d documents.", len(documents))
+        except Exception as e:
+            logger.error("Failed to index documents: %s", str(e))
+            raise
 
     def tokenize_documents(self, documents: List[Document]) -> List[List[str]]:
         """
@@ -46,59 +65,52 @@ class SparseSearch:
         Returns:
             List[List[str]]: A list of tokenized documents.
         """
-        logger.info("Tokenizing documents.")
-        return [doc.text.split() for doc in documents]
+        try:
+            tokenized = [doc.text.split() for doc in documents]
+            logger.info("Successfully tokenized %d documents.", len(documents))
+            return tokenized
+        except Exception as e:
+            logger.error("Failed to tokenize documents: %s", str(e))
+            raise
 
-    def build_index(self, documents: List[Document]) -> None:
+    def search(self, query: str, top_k: int = 10) -> List[SearchResult]:
         """
-        Builds the BM25 index for the given documents.
+        Performs a sparse retrieval search using BM25.
 
         Args:
-            documents (List[Document]): A list of documents to index.
-        """
-        logger.info("Building BM25 index.")
-        self.documents = documents
-        tokenized_corpus = self.tokenize_documents(documents)
-        self.bm25 = BM25Okapi(tokenized_corpus)
-
-    def search(self, query: str, top_k: int) -> List[QueryResult]:
-        """
-        Searches the indexed documents using the given query.
-
-        Args:
-            query (str): The search query.
-            top_k (int): The number of top results to return.
+            query (str): The user query.
+            top_k (int): The number of top results to retrieve.
 
         Returns:
-            List[QueryResult]: A list of top_k ranked documents with scores.
+            List[SearchResult]: A list of search results.
         """
         if not self.bm25:
-            logger.error("BM25 index is not built. Call build_index() first.")
-            raise ValueError("BM25 index is not built. Call build_index() first.")
+            raise ValueError("BM25 index is not initialized. Please index documents first.")
 
-        logger.info("Scoring query against indexed documents.")
-        tokenized_query = query.split()
-        scores = self.bm25.get_scores(tokenized_query)
-        ranked_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
+        try:
+            tokenized_query = query.split()
+            scores = self.bm25.get_scores(tokenized_query)
+            top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
 
-        logger.info("Returning top_k ranked documents.")
-        return [
-            QueryResult(
-                text=self.documents[i].text,
-                metadata=self.documents[i].metadata,
-                score=scores[i]
-            )
-            for i in ranked_indices
-        ]
+            results = []
+            for idx in top_indices:
+                document = self.documents[idx]
+                results.append(
+                    SearchResult(
+                        id=document.id,
+                        score=scores[idx],
+                        payload={
+                            "chunk_id": document.metadata.get("chunk_id"),
+                            "document_name": document.metadata.get("document_name"),
+                            "text": document.text,
+                            "domain": document.metadata.get("domain"),
+                            "metadata": document.metadata,
+                        },
+                    )
+                )
 
-# Example usage:
-# if __name__ == "__main__":
-#     documents = [
-#         Document(text="This is a test document.", metadata={"id": 1}),
-#         Document(text="Another document for testing.", metadata={"id": 2}),
-#     ]
-#     search_engine = SparseSearch()
-#     search_engine.build_index(documents)
-#     results = search_engine.search(query="test", top_k=2)
-#     for result in results:
-#         print(result.json())
+            logger.info("Search completed successfully with %d results.", len(results))
+            return results
+        except Exception as e:
+            logger.error("Search failed: %s", str(e))
+            raise
