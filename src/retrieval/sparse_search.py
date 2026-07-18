@@ -11,11 +11,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Document:
     """
-    Represents a document with text and metadata.
+    Represents a document with text, metadata, and domain information.
     """
     id: str
     text: str
     metadata: Dict[str, Any]
+    domain: Optional[str] = None
 
 @dataclass
 class SearchResult:
