@@ -134,3 +134,4 @@ results = sparse_search.search(query, top_k=2)
 # Print results
 for result in results:
     logger.info("Search result: %s", result)
+    
