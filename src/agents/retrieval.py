@@ -236,7 +236,74 @@ class RetrievalAgent:
         Returns:
             AgentState: The updated agent state with the summary.
         """
-        # Example: Combine text from chunks into a summary
-        summary = " ".join(chunk.text for chunk in chunks)
-        agent_state.result_summary = summary
-        return agent_state
+        try:
+            logger.info("Generating smart summary for %d chunks.", len(chunks))
+
+            if not chunks:
+                logger.warning("No chunks provided for summarization.")
+                agent_state.result_summary = "No content available for summarization."
+                return agent_state
+
+            # Combine text from chunks into a single summary
+            combined_text = " ".join(chunk.text for chunk in chunks)
+
+            # Check if the combined text exceeds the context window
+            context_window = agent_state.current_task.context_window
+            if len(combined_text) > context_window:
+                logger.info("Combined text exceeds context window. Summarizing content.")
+                # Example summarization logic (replace with actual summarization model if available)
+                summary = self._summarize_text(combined_text)
+            else:
+                summary = combined_text
+
+            # Add citations for each chunk
+            citations = [
+                f"[{chunk.document_name} - {chunk.chunk_id}]"
+                for chunk in chunks
+            ]
+            summary_with_citations = f"{summary}\n\nCitations:\n" + "\n".join(citations)
+
+            # Update the agent state with the summary
+            agent_state.result_summary = summary_with_citations
+            logger.info("Smart summary generated successfully.")
+            return agent_state
+
+        except Exception as e:
+            logger.error("Failed to generate smart summary: %s", str(e))
+            raise
+
+    def _summarize_text(self, text: str) -> str:
+        """
+        Summarize the given text. This is a placeholder for an actual summarization model.
+
+        Args:
+            text (str): The text to summarize.
+
+        Returns:
+            str: The summarized text.
+        """
+        # Placeholder logic: Return the first 500 characters as a summary
+        return text[:500] + "..."
+
+# Example chunks
+chunks = [
+    RetrievedChunk(chunk_id="1", document_name="doc1", text="This is the first chunk.", metadata={}, score=0.9),
+    RetrievedChunk(chunk_id="2", document_name="doc2", text="This is the second chunk.", metadata={}, score=0.8),
+]
+
+# Example agent state
+agent_state = AgentState(
+    current_task=Task(id="task1", description="Summarize HR policies", target_domain="HR", context_window=500, top_k=5),
+    retrieved_context=[],
+    tasks=[],
+    result_summary="",
+    status="",
+    next_agent="",
+)
+
+# Generate smart summary
+retrieval_agent = RetrievalAgent(dense_search, sparse_search, rrf)
+updated_state = retrieval_agent._generate_smart_summary(agent_state, chunks)
+
+# Print the result summary
+print(updated_state.result_summary)
