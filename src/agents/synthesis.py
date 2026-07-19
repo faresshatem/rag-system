@@ -29,32 +29,31 @@ class SynthesisAgent:
             # Step 1: Read execution history
             task_summaries = self._read_task_summaries(agent_state)
             retrieved_chunks = agent_state.retrieved_context
+
+            # Validate retrieved chunks
+            if not all(isinstance(chunk, RetrievedChunk) for chunk in retrieved_chunks):
+                logger.error("Invalid retrieved chunks in AgentState.")
+                raise ValueError("AgentState contains invalid retrieved chunks.")
+
+            # Filter chunks by domain
+            retrieved_chunks = self._filter_chunks_by_domain(retrieved_chunks, agent_state.current_task.target_domain)
+
+            # Handle edge cases
+            if not retrieved_chunks:
+                logger.warning("No retrieved chunks available for synthesis.")
+                return "No relevant information was found."
+
+            # Incorporate verification feedback
             verification_feedback = agent_state.verification_feedback
+            if verification_feedback:
+                logger.info("Incorporating verification feedback into the response.")
 
-            # Step 2: Handle scenarios
-            if agent_state.status == "CONDITION_NOT_MET":
-                logger.info("Task was skipped due to unmet conditions.")
-                return self._handle_conditional_skip(verification_feedback)
+            # Generate response
+            response = "Here is the information you requested:\n"
+            for chunk in retrieved_chunks:
+                response += f"- {chunk.text} [{chunk.chunk_id}]\n"
 
-            if agent_state.status == "ACCESS_DENIED":
-                logger.info("Access denied due to RBAC restrictions.")
-                return self._handle_access_denied()
-
-            if agent_state.status == "NO_RECORDS":
-                logger.info("No records found for the task.")
-                return self._handle_no_records()
-
-            if agent_state.status == "CASUAL_CONVERSATION":
-                logger.info("Handling casual conversation scenario.")
-                return self._handle_casual_conversation(agent_state)
-
-            if agent_state.status == "MIXED_RESULTS":
-                logger.info("Handling mixed results scenario.")
-                return self._handle_mixed_results(task_summaries, retrieved_chunks)
-
-            # Step 3: Normal Retrieval
-            logger.info("Handling normal retrieval scenario.")
-            return self._handle_normal_retrieval(retrieved_chunks)
+            return response
 
         except Exception as e:
             logger.error("Synthesis process failed: %s", str(e))
@@ -72,90 +71,26 @@ class SynthesisAgent:
         """
         return [task.description for task in agent_state.tasks]
 
-    def _handle_conditional_skip(self, feedback: str) -> str:
+    def _filter_chunks_by_domain(self, retrieved_chunks: List[RetrievedChunk], target_domain: str) -> List[RetrievedChunk]:
         """
-        Handle the conditional skip scenario.
-
-        Args:
-            feedback (str): The feedback explaining why the task was skipped.
-
-        Returns:
-            str: The response for the conditional skip scenario.
-        """
-        return f"The task was skipped: {feedback}"
-
-    def _handle_access_denied(self) -> str:
-        """
-        Handle the access denied scenario.
-
-        Returns:
-            str: The response for the access denied scenario.
-        """
-        return "Access to the requested information is restricted due to RBAC policies."
-
-    def _handle_no_records(self) -> str:
-        """
-        Handle the no records scenario.
-
-        Returns:
-            str: The response for the no records scenario.
-        """
-        return "No relevant information was found for the requested task."
-
-    def _handle_casual_conversation(self, agent_state: AgentState) -> str:
-        """
-        Handle the casual conversation scenario.
-
-        Args:
-            agent_state (AgentState): The complete state of the agent.
-
-        Returns:
-            str: The response for the casual conversation scenario.
-        """
-        return "This is a casual conversation. How can I assist you further?"
-
-    def _handle_mixed_results(self, task_summaries: List[str], retrieved_chunks: List[RetrievedChunk]) -> str:
-        """
-        Handle the mixed results scenario.
-
-        Args:
-            task_summaries (List[str]): The summaries of the tasks.
-            retrieved_chunks (List[RetrievedChunk]): The retrieved chunks.
-
-        Returns:
-            str: The response for the mixed results scenario.
-        """
-        response = "The results for your request are as follows:\n"
-        for chunk in retrieved_chunks:
-            response += f"- {chunk.text} [{chunk.chunk_id}]\n"
-        return response
-
-    def _handle_normal_retrieval(self, retrieved_chunks: List[RetrievedChunk]) -> str:
-        """
-        Handle the normal retrieval scenario.
+        Filter retrieved chunks by the target domain.
 
         Args:
             retrieved_chunks (List[RetrievedChunk]): The retrieved chunks.
+            target_domain (str): The target domain to filter chunks.
 
         Returns:
-            str: The response for the normal retrieval scenario.
+            List[RetrievedChunk]: The filtered chunks.
         """
-        if not retrieved_chunks:
-            logger.warning("No retrieved chunks available for normal retrieval.")
-            return "No relevant information was found."
-
-        response = "Here is the information you requested:\n"
-        for chunk in retrieved_chunks:
-            response += f"- {chunk.text} [{chunk.chunk_id}]\n"
-        return response
+        return [chunk for chunk in retrieved_chunks if chunk.metadata.get("domain") == target_domain]
 
 
 # Example AgentState
 agent_state = AgentState(
     status="NORMAL_RETRIEVAL",
     retrieved_context=[
-        RetrievedChunk(chunk_id="1", document_name="doc1", text="This is the first chunk.", metadata={}, score=0.9),
-        RetrievedChunk(chunk_id="2", document_name="doc2", text="This is the second chunk.", metadata={}, score=0.8),
+        RetrievedChunk(chunk_id="1", document_name="doc1", text="This is the first chunk.", metadata={"domain": "HR"}, score=0.9),
+        RetrievedChunk(chunk_id="2", document_name="doc2", text="This is the second chunk.", metadata={"domain": "Finance"}, score=0.8),
     ],
     tasks=[
         Task(id="task1", description="Retrieve HR policies", target_domain="HR"),
