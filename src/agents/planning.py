@@ -9,6 +9,7 @@ class TaskDefinition(BaseModel):
     description: str = Field(description="Explicit, self-contained description of the search or lookup task.")
     task_type: str = Field(description="Must be either 'vector_search' or 'structured_db_lookup'")
     target_domain: str = Field(description="Target domain, e.g., 'HR' or 'IT'")
+    is_dependent: str = Field(description="Set to the string 'true' if this task logically relies on the successful outcome of a previous task, or the string 'false' if it is completely independent.")
 
 class PlannerOutput(BaseModel):
     thought_process: str = Field(description="Chain of Thought: Analyze the query and break it down into a sequence of logical steps.")
@@ -38,9 +39,9 @@ def query_planning_node(state: AgentState) -> dict:
         RULES FOR PLAN CREATION:
         1. Break the user's query into a logical sequence of interdependent tasks.
         2. Generate ALL necessary tasks AT ONCE in the correct execution order.
-        3. CONTEXTUAL REWRITING: The `description` of each task must be explicit.
-        4. DYNAMIC REPLANNING: If you see previous 'Completed Tasks' that failed or changed the context, adjust your new plan accordingly.
-        5. If all logical tasks are done based on the History, set intent to 'ready_for_synthesis' and leave the plan empty.
+        3. CONTEXTUAL REWRITING: The `description` of each task must be explicit. When the user refers to "my" or "I" (e.g. "my ticket"), you MUST replace it with their actual username: '{username}'.
+        4. DEPENDENCY TRACKING: For each task, evaluate if it depends on a previous task. Set `is_dependent` to the string 'true' ONLY if it needs data or a successful outcome from a previous task. Set it to the string 'false' if it can run independently (e.g., asking two unrelated questions like leave balance and CEO tickets).
+        5. The plan is generated ONCE. Do not expect to replan. Provide the full plan upfront.
         INTENT CLASSIFICATION AND TASK RULES:
         1. "information_retrieval": Use this ONLY if the user is asking for specific internal company data, IT tickets, HR leave balances, or company policies.
         2. "casual_chat": Use this for greetings (e.g., "hi", "how are you"), small talk, AND general world knowledge questions (e.g., "tell me about AI", "what is Python?"). 
@@ -58,6 +59,7 @@ def query_planning_node(state: AgentState) -> dict:
     try:
         response: PlannerOutput = chain.invoke({
             "query": user_query,
+            "username": state.username or "Unknown User",
             "history": task_history if task_history else "No previous tasks."
         })
         
@@ -76,6 +78,7 @@ def query_planning_node(state: AgentState) -> dict:
                     "description": task_def.description,
                     "task_type": task_def.task_type,
                     "target_domain": task_def.target_domain,
+                    "is_dependent": str(task_def.is_dependent).strip().lower() == "true",
                     "status": "pending",
                     "result_summary": None
                 })
@@ -88,4 +91,24 @@ def query_planning_node(state: AgentState) -> dict:
         
     except Exception as e:
         print(f"Planning Agent Error: {e}")
-        return {"next_agent": "Synthesis_Agent", "current_task_id": None, "query_intent": "ready_for_synthesis"}
+        
+        # Inject the error into the state so Synthesis Agent can inform the user
+        error_task = {
+            "task_id": f"task_{uuid.uuid4().hex[:6]}",
+            "description": "System Error: API call failed.",
+            "task_type": "vector_search",
+            "target_domain": "HR",
+            "is_dependent": False,
+            "status": "completed",
+            "result_summary": f"SYSTEM ERROR: The AI API encountered an error (e.g. Rate Limit Reached). Details: {str(e)}"
+        }
+        
+        new_tasks = list(state.tasks)
+        new_tasks.append(error_task)
+        
+        return {
+            "tasks": new_tasks,
+            "next_agent": "Synthesis_Agent", 
+            "current_task_id": None, 
+            "query_intent": "ready_for_synthesis"
+        }

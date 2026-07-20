@@ -34,15 +34,23 @@ def supervisor_node(state: AgentState) -> dict:
         active_task = next((t for t in state.tasks if t.task_id == state.current_task_id), None)
         
     if state.is_context_valid is False and active_task:
-        # solve (Abort Plan)
-        if "No records found" in str(active_task.result_summary):
-            print(f"Supervisor: Domino Effect! Task [{active_task.task_id}] returned empty. Aborting the rest of the plan.")
-            return {"next_agent": "Synthesis_Agent", "current_task_id": None, "step_count": current_step + 1}
+        print(f"Supervisor: Task [{active_task.task_id}] failed validation or returned empty.")
         
-        # solve (Dynamic Replanning)
-        else:
-            print(f"Supervisor: Task [{active_task.task_id}] failed validation. Routing back to Planner for Dynamic Replanning.")
-            return {"next_agent": "Query-Planning_Agent", "current_task_id": None, "step_count": current_step + 1}
+        # 1. Mark the active task as failed
+        updated_tasks = list(state.tasks)
+        for t in updated_tasks:
+            if t.task_id == active_task.task_id:
+                t.status = "failed"
+                
+        # 2. Skip any pending tasks that are dependent
+        for t in updated_tasks:
+            if t.status == "pending" and getattr(t, "is_dependent", False):
+                print(f"Supervisor: Skipping dependent Task [{t.task_id}] due to previous failure.")
+                t.status = "skipped"
+                t.result_summary = "Skipped due to dependency failure."
+                
+        # 3. Update the state and continue to the next available task (do NOT loop back to Planner)
+        state.tasks = updated_tasks
 
     # 5. Plan Execution Logic
     if not state.tasks:
@@ -54,6 +62,7 @@ def supervisor_node(state: AgentState) -> dict:
     if not pending_tasks:
         print("Supervisor: All planned tasks completed successfully! Routing to Synthesis.")
         return {
+            "tasks": state.tasks,
             "next_agent": "Synthesis_Agent", 
             "current_task_id": None,
             "step_count": current_step + 1
@@ -84,6 +93,7 @@ def supervisor_node(state: AgentState) -> dict:
     print(f"Supervisor: Routing to {next_node} for Task [{next_task.task_id}] (Domain: {target_domain}).")
     
     return {
+        "tasks": state.tasks,
         "current_task_id": next_task.task_id,
         "next_agent": next_node,
         "target_domain": target_domain,
