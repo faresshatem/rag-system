@@ -105,4 +105,4 @@ synthesis_agent = SynthesisAgent()
 response = synthesis_agent.synthesize(agent_state)
 
 # Print the response
-print(response) 
+print(response)
