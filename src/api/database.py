@@ -1,4 +1,4 @@
-from sqlalchemy import create_backend, create_engine, Column, Integer, String
+from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -19,3 +19,11 @@ class User(Base):
     allowed_domains = Column(String)  # Stored as comma-separated string: "HR,IT"
 
 Base.metadata.create_all(bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+

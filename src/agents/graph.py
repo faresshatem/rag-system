@@ -65,8 +65,17 @@ def mock_verification_node(state: AgentState):
 
 def mock_synthesis_node(state: AgentState):
     print("\n[Mock Synthesis] Generating final text based on everything...")
+    finished_tasks = [t for t in state.tasks if t.status in ('completed', 'failed', 'skipped')]
+    
+    if finished_tasks:
+        summaries = [str(t.result_summary) for t in finished_tasks if t.result_summary]
+        final_answer = "Based on the retrieved policies and database lookups:\n" + "\n\n".join(summaries)
+    else:
+        final_answer = "I couldn't find any specific answers for your query, but how can I help you generally?"
+        
     return {
-        "next_agent": "END"
+        "next_agent": "END",
+        "answer": final_answer
     }
 
 
@@ -109,33 +118,3 @@ async def build_graph():
     
     app = workflow.compile(checkpointer=memory)
     return app
-
-
-async def main():
-    app = await build_graph()
-    
-    session_id = f"session_{uuid.uuid4().hex[:8]}"
-    config = {"configurable": {"thread_id": session_id}}
-    print(f"Starting new chat session with thread_id: {session_id}")
-    
-    initial_state = {
-        "messages": [{"role": "user", "content": "hi , how are you ? tell me about ai"}],
-        "allowed_domains": ["HR","IT"],
-        "step_count": 0,
-        "tasks": []
-    }
-  
-    print("🚀 Starting Local Graph Execution...\n" + "="*40)
-    
-    async for event in app.astream(initial_state, config=config):
-        for key, value in event.items():
-            print(f"\n🟢 --- Output from Node: {key} ---")
-            
-            for k, v in value.items():
-                if v is not None and k not in ["messages", "retrieved_context"]: 
-                    print(f"   ➤ {k}: {v}")
-                elif k == "retrieved_context" and v:
-                    print(f"   ➤ retrieved_context: [List containing {len(v)} chunk(s)]")
-
-if __name__ == "__main__":
-    asyncio.run(main())
