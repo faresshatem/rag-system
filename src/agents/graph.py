@@ -15,72 +15,6 @@ import uuid
 
 load_dotenv(find_dotenv())
 
-def mock_retrieval_node(state: AgentState):
-    print("\n[Mock Retrieval] Simulating vector search...")
-    updated_tasks = list(state.tasks)
-    
-    for t in updated_tasks:
-        if t.task_id == state.current_task_id:
-            t.status = "completed"
-            
-            if t.target_domain == 'HR':
-                t.result_summary = "HR Policy found: Employees can take up to 14 consecutive days of ANNUAL leave with direct manager approval."
-            elif t.target_domain == 'IT':
-                t.result_summary = "IT Policy found: RESOLVED tickets will be permanently closed after 48 hours of inactivity."
-            else:
-                t.result_summary = "Policy found: Standard company guidelines apply."
-                
-    return {
-        "tasks": updated_tasks,
-        "current_task_id": None, 
-        "next_agent": "Verification_Agent"
-    }
-def mock_verification_node(state: AgentState):
-    print("\n[Mock Verification] Checking retrieved data...")
-    
-    updated_tasks = list(state.tasks)
-    
-    active_task = next((t for t in updated_tasks if t.task_id == state.current_task_id), None)
-    
-    if active_task and active_task.status == 'completed':
-        
-        if "No records found" in str(active_task.result_summary):
-            print("   -> [Verification Failed] Database returned empty. Sending feedback.")
-            return {
-                "tasks": updated_tasks,
-                "is_context_valid": False, 
-                "next_agent": "Supervisor"
-            }
-            
-        if "Mocked context" in str(active_task.result_summary):
-            print("   -> [Verification Failed] Useless vector data found. Sending feedback.")
-            return {
-                "tasks": updated_tasks,
-                "is_context_valid": False, 
-                "next_agent": "Supervisor"
-            }
-            
-    print("   -> [Verification Passed] Data looks good. Approving.")
-    return {
-        "is_context_valid": True, 
-        "next_agent": "Supervisor"
-    }
-
-def mock_synthesis_node(state: AgentState):
-    print("\n[Mock Synthesis] Generating final text based on everything...")
-    finished_tasks = [t for t in state.tasks if t.status in ('completed', 'failed', 'skipped')]
-    
-    if finished_tasks:
-        summaries = [str(t.result_summary) for t in finished_tasks if t.result_summary]
-        final_answer = "Based on the retrieved policies and database lookups:\n" + "\n\n".join(summaries)
-    else:
-        final_answer = "I couldn't find any specific answers for your query, but how can I help you generally?"
-        
-    return {
-        "next_agent": "END",
-        "answer": final_answer
-    }
-
 
 async def build_graph():
     workflow = StateGraph(AgentState)
@@ -90,10 +24,10 @@ async def build_graph():
     workflow.add_node("Query-Planning_Agent", query_planning_node)
     workflow.add_node("Structured_Data_Agent", structured_data_node)
     
-    # 2. Add Nodes
-    workflow.add_node("Retrieval_Agent", mock_retrieval_node)
-    workflow.add_node("Verification_Agent", mock_verification_node)
-    workflow.add_node("Synthesis_Agent", mock_synthesis_node)
+    # 2. Add Real Team Member 2 Nodes (Dense+Sparse+RRF Retrieval, Verification, Synthesis)
+    workflow.add_node("Retrieval_Agent", retrieval_node)
+    workflow.add_node("Verification_Agent", verification_node)
+    workflow.add_node("Synthesis_Agent", synthesis_node)
 
     # 3. Entry Point
     workflow.add_edge(START, "Supervisor")
