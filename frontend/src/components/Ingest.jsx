@@ -77,14 +77,16 @@ const Ingest = () => {
       >
         <div className="input-group">
           <label>Target Namespace / Domain</label>
-          <input
-            type="text"
+          <select
             className="input-field"
             value={domain}
             onChange={(e) => setDomain(e.target.value)}
-            placeholder="e.g. IT, HR"
             required
-          />
+          >
+            <option value="" disabled>Select Domain</option>
+            <option value="IT">IT</option>
+            <option value="HR">HR</option>
+          </select>
         </div>
 
         <div className="input-group">

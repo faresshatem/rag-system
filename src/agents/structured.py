@@ -69,7 +69,8 @@ async def structured_data_node(state: AgentState) -> dict:
         - Write ONLY a valid PostgreSQL SELECT statement.
         - If the task mentions a user by name or username, ALWAYS use a JOIN with the 'users' table and filter by 'full_name' using ILIKE.
         - If the username contains underscores (e.g., 'ahmed_hassan'), replace the underscores with spaces and use wildcards (e.g., ILIKE '%ahmed hassan%') when filtering 'full_name'.
-        - CRITICAL: You MUST ALWAYS include the 'full_name' column in your SELECT statement so the system can verify exactly which user(s) were found.
+        - TRANSLATION MANDATE: If the task description or any entities/names are provided in Arabic, you MUST translate and transliterate them into their English equivalents before using them in the SQL query, as the database only stores English values. For example, convert "أحمد" to "ahmed", "حسن" to "hassan", and map Arabic terms to database enums (e.g., "مرضي" to 'SICK').
+        - CRITICAL: You MUST ALWAYS include both the 'id' (from the users table) and the 'full_name' column in your SELECT statement. This ensures the system can verify the user AND passes the exact user ID to subsequent tasks in the execution history.
         - CRITICAL CONDITIONAL LOGIC: If the Task Description contains a condition (e.g., "If the ticket is 'RESOLVED'...") AND you see from the Previous Execution History that this condition is FALSE, you MUST NOT generate a valid SQL query. Instead, output EXACTLY the phrase: "CONDITION_NOT_MET".
         """),
         ("user", "Task Description: {task}\n\nGenerate the exact SQL query.")
@@ -149,7 +150,7 @@ async def structured_data_node(state: AgentState) -> dict:
         summary = "Failed to execute database lookup."
 
     chunk = RetrievedChunk(
-        chunk_id=f"db_{active_task.task_id}",
+        chunk_id=f"{active_task.task_id}_db",
         file_name=f"{target_domain}_SQL_Database",
         text=result_text,
         page=None

@@ -63,9 +63,14 @@ def query_planning_node(state: AgentState) -> dict:
             "history": task_history if task_history else "No previous tasks."
         })
         
-        updates = {"query_intent": response.query_intent}
+        intent = str(response.query_intent).strip().lower().replace(" ", "_")
+        updates = {"query_intent": intent}
         
-        if response.query_intent in ["casual_chat", "ready_for_synthesis"] or not response.plan:
+        if intent == "casual_chat":
+            updates["next_agent"] = "Casual_Chat_Agent"
+            updates["current_task_id"] = None
+            updates["query_intent"] = "casual_chat"
+        elif intent == "ready_for_synthesis" or not response.plan:
             updates["next_agent"] = "Synthesis_Agent"
             updates["current_task_id"] = None
             updates["query_intent"] = "ready_for_synthesis"

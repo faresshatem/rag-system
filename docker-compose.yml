@@ -25,7 +25,7 @@ services:
     image: redis/redisinsight:latest
     container_name: agentic_redisinsight
     ports:
-      - "5540:5540"
+      - " :5540"
     restart: unless-stopped
     depends_on:
       - redis

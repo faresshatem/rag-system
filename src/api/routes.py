@@ -59,7 +59,10 @@ async def run_query(payload: QueryRequest, request: Request, user_context: dict 
         "allowed_domains": allowed_domains,
         "username": username,
         "step_count": 0,
-        "tasks": []
+        "tasks": [],
+        "query_intent": None,
+        "next_agent": None,
+        "current_task_id": None
     }
     
     session_id = user_context.get("session_id")
