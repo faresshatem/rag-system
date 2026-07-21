@@ -1,133 +1,108 @@
-from typing import List, Dict, Any
-from dataclasses import dataclass
-from src.agents.state import AgentState, Task, RetrievedChunk
 import logging
+from typing import List
+
+from pydantic import BaseModel, Field
+from langchain_core.prompts import ChatPromptTemplate
+
+from src.agents.state import AgentState, RetrievedChunk
+from src.generation.router import get_routed_llm
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@dataclass
+
+class VerificationOutput(BaseModel):
+    is_valid: bool = Field(description="True if the retrieved context sufficiently answers the task description.")
+    feedback: str = Field(description="Brief critique explaining why the context is or isn't sufficient.")
+
+
 class VerificationAgent:
     """
-    The Verification Agent evaluates whether the retrieved context satisfies the current task.
+    The Verification Agent evaluates whether the retrieved context satisfies the
+    current task, using the project's routed LLM for the judgement call.
     """
 
-    llm: Any
+    def _combine_chunks(self, chunks: List[RetrievedChunk]) -> str:
+        return " ".join(chunk.text for chunk in chunks)
 
-    def verify(self, agent_state: AgentState) -> AgentState:
-        """
-        Verify the retrieved context for the current task.
+    def verify(self, state: AgentState) -> dict:
+        active_task = next((t for t in state.tasks if t.task_id == state.current_task_id), None)
 
-        Args:
-            agent_state (AgentState): The current state of the agent.
+        if not active_task:
+            logger.info("No active task found. Passing verification through.")
+            return {"is_context_valid": True, "next_agent": "Supervisor"}
 
-        Returns:
-            AgentState: The updated state of the agent after verification.
-        """
+        logger.info("Verifying task: %s", active_task.task_id)
+
+        # Only the chunks produced for this specific task (tagged by retrieval_node
+        # with a "{task_id}_" chunk_id prefix) are relevant to this verification pass.
+        task_chunks = [c for c in state.retrieved_context if c.chunk_id.startswith(f"{active_task.task_id}_")]
+
+        if active_task.status == "completed" and active_task.result_summary and (
+            "ACCESS DENIED" in active_task.result_summary
+            or "Skipped" in active_task.result_summary
+            or "Task Skipped" in active_task.result_summary
+        ):
+            logger.info("Task was skipped/access-denied upstream. Marking context as valid.")
+            return {"is_context_valid": True, "next_agent": "Supervisor"}
+
+        if not task_chunks:
+            logger.warning("No records found for task: %s", active_task.task_id)
+            return {
+                "is_context_valid": False,
+                "verification_feedback": "No relevant data was retrieved for this task.",
+                "next_agent": "Supervisor",
+            }
+
+        context_text = self._combine_chunks(task_chunks)
+
         try:
-            logger.info("Starting verification process.")
+            llm = get_routed_llm(state)
+            structured_llm = llm.with_structured_output(VerificationOutput)
 
-            # Step 1: Locate the active task
-            task = next((t for t in agent_state.tasks if t.task_id == agent_state.current_task_id), None)
-            if not task and agent_state.tasks:
-                task = agent_state.tasks[0]
-            if not task:
-                logger.warning("No active task found in AgentState.")
-                return self._update_agent_state(agent_state, True, "Skipped", "Supervisor", None)
+            prompt = ChatPromptTemplate.from_messages([
+                (
+                    "system",
+                    "You are a strict Verification Agent for an Enterprise RAG system. "
+                    "Given a task description and the retrieved context, decide whether the "
+                    "context actually contains enough information to answer the task. "
+                    "Be strict: if the context is empty, off-topic, or only tangentially related, mark it invalid.",
+                ),
+                (
+                    "user",
+                    "Task Description: {task}\n\nRetrieved Context:\n{context}",
+                ),
+            ])
 
-            logger.info("Verifying task: %s", task.task_id)
+            response: VerificationOutput = (prompt | structured_llm).invoke({
+                "task": active_task.description,
+                "context": context_text,
+            })
 
-            # Step 2: Read retrieved chunks
-            retrieved_chunks = agent_state.retrieved_context
+            logger.info("Verification result for task %s: is_valid=%s", active_task.task_id, response.is_valid)
 
-            # Step 3: Fast Rule Evaluation
-            if getattr(task, 'status', None) in ["CONDITION_NOT_MET", "SKIPPED"]:
-                logger.info("Task skipped or condition not met. Marking context as valid.")
-                return self._update_agent_state(agent_state, True, "Skipped", "Supervisor", task)
-
-            if not retrieved_chunks:
-                logger.warning("No records found for task: %s", getattr(task, 'task_id', 'unknown'))
-                return self._update_agent_state(agent_state, False, "No data found", "Supervisor", task)
-
-            # Step 4: Use LLM to evaluate the task description and retrieved context
-            task_description = task.description
-            context_text = self._combine_chunks(retrieved_chunks)
-
-            logger.info("Sending task description and context to LLM for evaluation.")
-            llm_response = self.llm.evaluate(task_description=task_description, context=context_text)
-
-            is_valid = llm_response.get("is_valid", False)
-            feedback = llm_response.get("feedback", "No feedback provided.")
-
-            # Step 5: Update AgentState based on LLM response
-            if is_valid:
-                logger.info("LLM verified the context as valid.")
-                return self._update_agent_state(agent_state, True, "Valid context", "Supervisor", task)
-            else:
-                logger.info("LLM determined the context is invalid. Feedback: %s", feedback)
-                return self._update_agent_state(agent_state, False, feedback, "Supervisor", task)
+            return {
+                "is_context_valid": response.is_valid,
+                "verification_feedback": response.feedback,
+                "next_agent": "Supervisor",
+            }
 
         except Exception as e:
             logger.error("Verification process failed: %s", str(e))
-            raise
-
-    def _combine_chunks(self, chunks: List[RetrievedChunk]) -> str:
-        """
-        Combine the text of retrieved chunks into a single context string.
-
-        Args:
-            chunks (List[RetrievedChunk]): The retrieved chunks.
-
-        Returns:
-            str: The combined context text.
-        """
-        return " ".join(chunk.text for chunk in chunks)
-
-    def _update_agent_state(
-        self, agent_state: AgentState, is_context_valid: bool, feedback: str, next_agent: str, task: Task
-    ) -> AgentState:
-        """
-        Update the AgentState with verification results.
-
-        Args:
-            agent_state (AgentState): The current state of the agent.
-            is_context_valid (bool): Whether the context is valid.
-            feedback (str): Feedback from the verification process.
-            next_agent (str): The next agent to execute.
-            task (Task): The current task being verified.
-
-        Returns:
-            AgentState: The updated agent state.
-        """
-        agent_state.is_context_valid = is_context_valid
-        agent_state.verification_feedback = feedback
-        agent_state.next_agent = next_agent
-        if task:
-            task.status = "verified" if is_context_valid else "failed_verification"
-        return agent_state
+            # Fail open on infra/LLM errors so a transient failure doesn't
+            # permanently block the task; Supervisor still owns retry/skip logic.
+            return {
+                "is_context_valid": True,
+                "verification_feedback": f"Verification could not be completed due to an error: {str(e)}",
+                "next_agent": "Supervisor",
+            }
 
 
-# Example LLM implementation
-class MockLLM:
-    def evaluate(self, task_description: str, context: str) -> Dict[str, Any]:
-        # Mock evaluation logic
-        if "valid" in context:
-            return {"is_valid": True, "feedback": "Context is valid."}
-        else:
-            return {"is_valid": False, "feedback": "Context is invalid. Please refine your query."}
+_verification_agent = VerificationAgent()
 
-# --- Node Wrapper ---
-_verification_agent_instance = None
 
 def verification_node(state: AgentState) -> dict:
-    global _verification_agent_instance
-    if _verification_agent_instance is None:
-        _verification_agent_instance = VerificationAgent(llm=MockLLM())
-        
-    updated_state = _verification_agent_instance.verify(state)
-    return {
-        "is_context_valid": updated_state.is_context_valid,
-        "verification_feedback": getattr(updated_state, 'verification_feedback', None),
-        "next_agent": updated_state.next_agent
-    }
+    """LangGraph node wrapper around VerificationAgent.verify()."""
+    print("\n[Verification Agent] Evaluating retrieved context...")
+    return _verification_agent.verify(state)
