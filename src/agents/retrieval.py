@@ -1,314 +1,182 @@
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
-from sentence_transformers import SentenceTransformer
-from src.retrieval.dense_search import DenseSearch
-from src.retrieval.sparse_search import SparseSearch
-from src.retrieval.fusion import ReciprocalRankFusion
-from src.retrieval.dense_search import SearchResult
-from src.agents.state import RetrievedChunk, AgentState, Task
+import os
 import logging
+from typing import List, Optional
+
+from src.agents.state import AgentState, RetrievedChunk, Task
+from src.retrieval.dense_search import DenseSearch
+from src.retrieval.sparse_search import SparseSearch, Document as SparseDocument
+from src.retrieval.fusion import ReciprocalRankFusion
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@dataclass
+DEFAULT_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", 5))
+MAX_SUMMARY_CHARS = 500
+
+
 class RetrievalAgent:
     """
-    The Retrieval Agent handles the retrieval process for a given task, including dense and sparse retrieval,
-    reciprocal rank fusion, metadata filtering, and context preparation for downstream agents.
+    The Retrieval Agent handles the retrieval process for a given task: dense retrieval,
+    sparse (BM25) retrieval, Reciprocal Rank Fusion, domain filtering and context
+    preparation for the downstream Verification/Synthesis agents.
     """
 
-    dense_search: DenseSearch
-    sparse_search: SparseSearch
-    rrf: ReciprocalRankFusion
-    embedding_model: SentenceTransformer
-
     def __init__(self, dense_search: DenseSearch, sparse_search: SparseSearch, rrf: ReciprocalRankFusion):
-        """
-        Initialize the RetrievalAgent with dense and sparse search modules, RRF, and the embedding model.
-
-        Args:
-            dense_search (DenseSearch): The dense retrieval module.
-            sparse_search (SparseSearch): The sparse retrieval module.
-            rrf (ReciprocalRankFusion): The reciprocal rank fusion module.
-        """
         self.dense_search = dense_search
         self.sparse_search = sparse_search
         self.rrf = rrf
-        self.embedding_model = SentenceTransformer("intfloat/multilingual-e5-base")
-        logger.info("RetrievalAgent initialized with mE5 embedding model.")
+        self._sparse_index_ready = False
 
-    def execute(self, agent_state: AgentState) -> AgentState:
+    def _ensure_sparse_index(self) -> None:
         """
-        Execute the retrieval task based on the current AgentState.
-
-        Args:
-            agent_state (AgentState): The current state of the agent.
-
-        Returns:
-            AgentState: The updated state of the agent after retrieval.
+        The BM25 SparseSearch index lives in memory and must be populated before use.
+        Build it once, lazily, from the same Qdrant collection the DenseSearch module
+        reads from, so both retrieval paths operate over the same corpus.
         """
+        if self._sparse_index_ready:
+            return
+
         try:
-            logger.info("Starting retrieval task execution.")
+            client = self.dense_search.qdrant_client
+            collection_name = self.dense_search.collection_name
 
-            # Step 1: Get the current task
-            task = next((t for t in agent_state.tasks if t.task_id == agent_state.current_task_id), None)
-            if not task and agent_state.tasks:
-                task = agent_state.tasks[0]
-            if not task:
-                logger.warning("No active task found in AgentState.")
-                return self._update_status(agent_state, "NO_TASK")
-
-            logger.info("Processing task: %s", task.task_id)
-
-            # Step 2: Extract task details
-            task_description = task.description
-            target_domain = task.target_domain
-            task_id = getattr(task, 'task_id', 'unknown')
-
-            # Step 3: Check execution history
-            if self._should_skip_task(agent_state, task):
-                logger.info("Task %s skipped due to unmet conditions.", task_id)
-                return self._update_status(agent_state, "CONDITION_NOT_MET")
-
-            # Step 4: Generate optimized query
-            optimized_query = self._generate_query(task_description)
-
-            # Step 5: Encode query using mE5
-            encoded_query = self._encode_query(optimized_query)
-
-            # Step 6: Run Dense Search
-            top_k = getattr(task, 'top_k', 5)
-            dense_results = self.dense_search.search(
-                query=optimized_query, domain=target_domain, metadata=getattr(task, 'metadata', {}), top_k=top_k
+            points, _ = client.scroll(
+                collection_name=collection_name,
+                limit=10000,
+                with_payload=True,
+                with_vectors=False,
             )
-            logger.info("Dense search completed with %d results.", len(dense_results))
 
-            # Step 7: Run Sparse Search
-            sparse_results = self.sparse_search.search(query=optimized_query, top_k=top_k)
-            logger.info("Sparse search completed with %d results.", len(sparse_results))
+            documents = [
+                SparseDocument(
+                    id=str(point.payload.get("chunk_id", point.id)),
+                    text=point.payload.get("text", "") or "",
+                    metadata=point.payload,
+                )
+                for point in points
+                if point.payload
+            ]
 
-            # Step 8: Fuse results using RRF
-            fused_results = self.rrf.fuse(dense_results, sparse_results)
-            logger.info("Reciprocal Rank Fusion completed with %d fused results.", len(fused_results))
-
-            # Step 9: Filter results by domain
-            filtered_results = self._filter_results_by_domain(fused_results, target_domain)
-            logger.info("Filtered results to %d based on domain: %s.", len(filtered_results), target_domain)
-
-            # Step 10: Return Top K results
-            top_results = filtered_results[:top_k]
-
-            # Step 11: Convert to RetrievedChunk objects
-            retrieved_chunks = self._convert_to_retrieved_chunks(top_results)
-
-            # Step 12: Update AgentState
-            agent_state = self._update_agent_state(agent_state, retrieved_chunks, task, "SUCCESS")
-
-            # Step 13: Handle edge cases
-            if not retrieved_chunks:
-                logger.warning("No records retrieved for task %s.", task_id)
-                return self._update_status(agent_state, "NO_RECORDS")
-
-            context_window = getattr(task, 'context_window', 4000)
-            if len(retrieved_chunks) > context_window:
-                logger.info("Results exceed context window. Generating smart summary.")
-                agent_state = self._generate_smart_summary(agent_state, retrieved_chunks, task)
-
-            # Step 15: Set next agent
-            agent_state.next_agent = "Verification_Agent"
-            logger.info("Next agent set to Verification_Agent.")
-
-            return agent_state
-
+            self.sparse_search.index_documents(documents)
+            self._sparse_index_ready = True
+            logger.info("Sparse (BM25) index built with %d documents.", len(documents))
         except Exception as e:
-            logger.error("Retrieval task execution failed: %s", str(e))
-            return self._update_status(agent_state, "ERROR")
-
-    def _should_skip_task(self, agent_state: AgentState, task: Task) -> bool:
-        """
-        Check if the task should be skipped based on execution history.
-
-        Args:
-            agent_state (AgentState): The current state of the agent.
-            task (Task): The current task.
-
-        Returns:
-            bool: True if the task should be skipped, False otherwise.
-        """
-        # Example condition: Check if the task has already been completed
-        return task.status == "completed"
+            logger.error("Failed to build sparse index from Qdrant: %s", str(e))
 
     def _generate_query(self, task_description: str) -> str:
-        """
-        Generate an optimized query from the task description.
+        return task_description
 
-        Args:
-            task_description (str): The task description.
-
-        Returns:
-            str: The optimized query.
-        """
-        return f"query: {task_description}"
-
-    def _encode_query(self, query: str) -> List[float]:
-        """
-        Encode the query using the mE5 embedding model.
-
-        Args:
-            query (str): The query to encode.
-
-        Returns:
-            List[float]: The encoded query vector.
-        """
-        return self.embedding_model.encode(query, normalize_embeddings=True)
-
-    def _filter_results_by_domain(self, results: List[SearchResult], domain: str) -> List[SearchResult]:
-        """
-        Filter results by the specified domain.
-
-        Args:
-            results (List[SearchResult]): The search results.
-            domain (str): The target domain.
-
-        Returns:
-            List[SearchResult]: The filtered results.
-        """
+    def _filter_results_by_domain(self, results: List, domain: Optional[str]) -> List:
+        if not domain:
+            return results
         return [result for result in results if result.payload.get("domain") == domain]
 
-    def _convert_to_retrieved_chunks(self, results: List[SearchResult]) -> List[RetrievedChunk]:
-        """
-        Convert SearchResult objects to RetrievedChunk objects.
+    def _convert_to_retrieved_chunks(self, results: List, task_id: str) -> List[RetrievedChunk]:
+        chunks = []
+        for result in results:
+            payload = result.payload or {}
+            metadata = payload.get("metadata") or {}
+            page = metadata.get("page") if isinstance(metadata, dict) else None
 
-        Args:
-            results (List[SearchResult]): The search results.
-
-        Returns:
-            List[RetrievedChunk]: The retrieved chunks.
-        """
-        return [
-            RetrievedChunk(
-                chunk_id=result.payload.get("chunk_id"),
-                file_name=result.payload.get("document_name"),
-                text=result.payload.get("text"),
-                metadata=result.payload.get("metadata", {}),
-                score=result.score,
+            chunks.append(
+                RetrievedChunk(
+                    chunk_id=f"{task_id}_{payload.get('chunk_id', result.id)}",
+                    file_name=payload.get("document_name") or "unknown",
+                    text=payload.get("text") or "",
+                    page=page,
+                )
             )
-            for result in results
-        ]
+        return chunks
 
-    def _update_agent_state(self, agent_state: AgentState, chunks: List[RetrievedChunk], task: Task, status: str) -> AgentState:
+    def execute(self, task: Task) -> List[RetrievedChunk]:
         """
-        Update the AgentState with the retrieved chunks and task status.
-
-        Args:
-            agent_state (AgentState): The current state of the agent.
-            chunks (List[RetrievedChunk]): The retrieved chunks.
-            task (Task): The current task.
-            status (str): The task status.
-
-        Returns:
-            AgentState: The updated agent state.
+        Run dense + sparse retrieval for a single task and return the fused,
+        domain-filtered RetrievedChunk list (already in AgentState's schema).
         """
-        agent_state.retrieved_context = chunks
-        if task:
-            task.status = status
-        return agent_state
+        query = self._generate_query(task.description)
 
-    def _update_status(self, agent_state: AgentState, status: str) -> AgentState:
-        """
-        Update the status of the AgentState.
+        dense_results = self.dense_search.search(
+            query=query, domain=task.target_domain, top_k=DEFAULT_TOP_K
+        )
+        logger.info("Dense search completed with %d results.", len(dense_results))
 
-        Args:
-            agent_state (AgentState): The current state of the agent.
-            status (str): The new status.
+        self._ensure_sparse_index()
+        sparse_results = self.sparse_search.search(query=query, top_k=DEFAULT_TOP_K) if self._sparse_index_ready else []
+        logger.info("Sparse search completed with %d results.", len(sparse_results))
 
-        Returns:
-            AgentState: The updated agent state.
-        """
-        task = next((t for t in agent_state.tasks if t.task_id == agent_state.current_task_id), None)
-        if task:
-            task.status = status
-        return agent_state
+        fused_results = self.rrf.fuse(dense_results, sparse_results)
+        logger.info("Reciprocal Rank Fusion completed with %d fused results.", len(fused_results))
 
-    def _generate_smart_summary(self, agent_state: AgentState, chunks: List[RetrievedChunk], task: Task) -> AgentState:
-        """
-        Generate a smart summary for large context windows.
+        filtered_results = self._filter_results_by_domain(fused_results, task.target_domain)
+        top_results = filtered_results[:DEFAULT_TOP_K]
 
-        Args:
-            agent_state (AgentState): The current state of the agent.
-            chunks (List[RetrievedChunk]): The retrieved chunks.
+        return self._convert_to_retrieved_chunks(top_results, task.task_id)
 
-        Returns:
-            AgentState: The updated agent state with the summary.
-        """
-        try:
-            logger.info("Generating smart summary for %d chunks.", len(chunks))
 
-            if not chunks:
-                logger.warning("No chunks provided for summarization.")
-                if task:
-                    task.result_summary = "No content available for summarization."
-                return agent_state
+# ---------------------------------------------------------------------------
+# Singleton wiring (Dense/Sparse/RRF components are relatively expensive to
+# construct - e.g. they load the mE5 embedding model - so they are built once
+# and reused across graph invocations).
+# ---------------------------------------------------------------------------
+_retrieval_agent: Optional[RetrievalAgent] = None
 
-            # Combine text from chunks into a single summary
-            combined_text = " ".join(chunk.text for chunk in chunks)
 
-            # Check if the combined text exceeds the context window
-            context_window = getattr(task, 'context_window', 4000)
-            if len(combined_text) > context_window:
-                logger.info("Combined text exceeds context window. Summarizing content.")
-                # Example summarization logic (replace with actual summarization model if available)
-                summary = self._summarize_text(combined_text)
-            else:
-                summary = combined_text
+def _get_retrieval_agent() -> RetrievalAgent:
+    global _retrieval_agent
+    if _retrieval_agent is None:
+        _retrieval_agent = RetrievalAgent(
+            dense_search=DenseSearch(),
+            sparse_search=SparseSearch(),
+            rrf=ReciprocalRankFusion(),
+        )
+    return _retrieval_agent
 
-            # Add citations for each chunk
-            citations = [
-                f"[{getattr(chunk, 'file_name', 'Unknown Document')} - {chunk.chunk_id}]"
-                for chunk in chunks
-            ]
-            summary_with_citations = f"{summary}\n\nCitations:\n" + "\n".join(citations)
-
-            # Update the agent state with the summary
-            if task:
-                task.result_summary = summary_with_citations
-            logger.info("Smart summary generated successfully.")
-            return agent_state
-
-        except Exception as e:
-            logger.error("Failed to generate smart summary: %s", str(e))
-            raise
-
-    def _summarize_text(self, text: str) -> str:
-        """
-        Summarize the given text. This is a placeholder for an actual summarization model.
-
-        Args:
-            text (str): The text to summarize.
-
-        Returns:
-            str: The summarized text.
-        """
-        # Placeholder logic: Return the first 500 characters as a summary
-        return text[:500] + "..."
-
-# --- Node Wrapper ---
-_retrieval_agent_instance = None
 
 def retrieval_node(state: AgentState) -> dict:
-    global _retrieval_agent_instance
-    if _retrieval_agent_instance is None:
-        dense = DenseSearch(qdrant_url="http://localhost:6333", collection_name="my_collection")
-        sparse = SparseSearch()
-        rrf = ReciprocalRankFusion()
-        _retrieval_agent_instance = RetrievalAgent(dense_search=dense, sparse_search=sparse, rrf=rrf)
-        
-    updated_state = _retrieval_agent_instance.execute(state)
-    
+    """
+    LangGraph node wrapper around RetrievalAgent.execute(). Performs hybrid
+    (dense + sparse + RRF) retrieval for the currently active task and updates
+    the task status / result summary and the shared retrieved_context list.
+    """
+    print("\n[Retrieval Agent] Running hybrid dense + sparse retrieval...")
+
+    active_task = next((t for t in state.tasks if t.task_id == state.current_task_id), None)
+    if not active_task:
+        logger.warning("No active task found in AgentState for Retrieval_Agent.")
+        return {"next_agent": "Verification_Agent"}
+
+    try:
+        agent = _get_retrieval_agent()
+        new_chunks = agent.execute(active_task)
+    except Exception as e:
+        logger.error("Retrieval task execution failed: %s", str(e))
+        updated_tasks = list(state.tasks)
+        for t in updated_tasks:
+            if t.task_id == active_task.task_id:
+                t.status = "completed"
+                t.result_summary = f"Retrieval failed due to an error: {str(e)}"
+        return {
+            "tasks": updated_tasks,
+            "next_agent": "Verification_Agent",
+        }
+
+    updated_tasks = list(state.tasks)
+    for t in updated_tasks:
+        if t.task_id == active_task.task_id:
+            t.status = "completed"
+            if new_chunks:
+                combined_text = " ".join(chunk.text for chunk in new_chunks)
+                summary = combined_text[:MAX_SUMMARY_CHARS]
+                t.result_summary = f"Retrieved {len(new_chunks)} chunk(s): {summary}"
+            else:
+                t.result_summary = "No records found for this task."
+
+    updated_context = list(state.retrieved_context) + new_chunks
+
     return {
-        "retrieved_context": updated_state.retrieved_context,
-        "tasks": updated_state.tasks,
-        "next_agent": updated_state.next_agent,
+        "tasks": updated_tasks,
+        "retrieved_context": updated_context,
+        "current_task_id": None,
+        "next_agent": "Verification_Agent",
     }
