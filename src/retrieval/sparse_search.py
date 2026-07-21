@@ -84,8 +84,7 @@ class SparseSearch:
             List[SearchResult]: A list of search results.
         """
         if not self.bm25:
-            logger.warning("BM25 index is not initialized. Returning empty sparse results.")
-            return []
+            raise ValueError("BM25 index is not initialized. Please index documents first.")
 
         try:
             tokenized_query = query.split()
@@ -114,3 +113,26 @@ class SparseSearch:
         except Exception as e:
             logger.error("Search failed: %s", str(e))
             raise
+
+if __name__ == "__main__":
+    # Example documents
+    documents = [
+        Document(id="1", text="This is the first document.", metadata={"document_name": "doc1", "domain": "HR"}),
+        Document(id="2", text="This is the second document.", metadata={"document_name": "doc2", "domain": "IT"}),
+        Document(id="3", text="This is the third document.", metadata={"document_name": "doc3", "domain": "Finance"}),
+    ]
+
+    # Initialize SparseSearch
+    sparse_search = SparseSearch()
+
+    # Index documents
+    sparse_search.index_documents(documents)
+
+    # Perform a search
+    query = "first document"
+    results = sparse_search.search(query, top_k=2)
+
+    # Print results
+    for result in results:
+        logger.info("Search result: %s", result)
+    
