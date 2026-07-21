@@ -33,12 +33,17 @@ class DenseSearch:
             collection_name (str): The name of the Qdrant collection to search.
             top_k (int): Number of top results to retrieve.
         """
-        self.qdrant_url = qdrant_url
-        self.collection_name = collection_name or os.getenv("QDRANT_COLLECTION_NAME")
+        self.qdrant_url = qdrant_url or os.getenv("QDRANT_URL", "http://localhost:6333")
+        self.collection_name = (
+            collection_name
+            or os.getenv("QDRANT_COLLECTION")
+            or os.getenv("QDRANT_COLLECTION_NAME")
+            or "documents"
+        )
         self.top_k = top_k
 
         if not self.collection_name:
-            raise ValueError("Collection name must be provided or set in the environment variable 'QDRANT_COLLECTION_NAME'.")
+            raise ValueError("Collection name must be provided or set in the environment variable 'QDRANT_COLLECTION'.")
 
         try:
             self.qdrant_client = QdrantClient(url=self.qdrant_url)
@@ -115,17 +120,14 @@ class DenseSearch:
             search_filter = self._build_filter(domain, metadata)
             top_k = top_k or self.top_k
 
-            results = self.qdrant_client.query_points(
+            results = self.qdrant_client.search(
                 collection_name=self.collection_name,
-                query=query_vector,
+                query_vector=query_vector,
                 query_filter=search_filter,
                 limit=top_k
             )
 
-            # query_points returns a QueryResponse, so we get points from it
-            points = results.points
-
-            logger.info("Search completed successfully with %d results.", len(points))
+            logger.info("Search completed successfully with %d results.", len(results))
             return [
                 SearchResult(
                     id=result.id,
@@ -138,10 +140,30 @@ class DenseSearch:
                         "metadata": result.payload.get("metadata"),
                     },
                 )
-                for result in points
+                for result in results
             ]
 
         except Exception as e:
             logger.error("Search failed: %s", str(e))
             raise
 
+
+if __name__ == "__main__":
+    try:
+        # Initialize DenseSearch
+        dense_search = DenseSearch(qdrant_url="http://localhost:6333", collection_name="my_collection", top_k=5)
+
+        # Perform a search
+        results = dense_search.search(
+            query="What are the HR policies for remote work?",
+            domain="HR",
+            metadata={"policy_type": "remote_work"},
+            top_k=3
+        )
+
+        # Print results
+        for result in results:
+            print(result)
+
+    except Exception as e:
+        logger.error("An error occurred during the dense search: %s", str(e))
