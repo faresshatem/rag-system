@@ -144,22 +144,3 @@ class ReciprocalRankFusion:
         logger.info("Removed duplicates. Unique results count: %d.", len(unique_results))
         return unique_results
 
-
-# Example dense and sparse results
-dense_results = [
-    SearchResult(id="1", score=0.9, payload={"chunk_id": "c1", "document_name": "doc1", "text": "Dense text 1", "domain": "HR", "metadata": {}}),
-    SearchResult(id="2", score=0.8, payload={"chunk_id": "c2", "document_name": "doc2", "text": "Dense text 2", "domain": "IT", "metadata": {}})
-]
-
-sparse_results = [
-    SearchResult(id="2", score=0.85, payload={"chunk_id": "c2", "document_name": "doc2", "text": "Sparse text 2", "domain": "IT", "metadata": {}}),
-    SearchResult(id="3", score=0.7, payload={"chunk_id": "c3", "document_name": "doc3", "text": "Sparse text 3", "domain": "Finance", "metadata": {}})
-]
-
-# Perform Reciprocal Rank Fusion
-rrf = ReciprocalRankFusion(k=60)
-fused_results = rrf.fuse(dense_results, sparse_results)
-
-# Print fused results
-for result in fused_results:
-    print(result)

@@ -1,7 +1,6 @@
 from typing import List, Dict, Any
 from dataclasses import dataclass
-from src.models import AgentState, Task, RetrievedChunk
-from src.llm import LLM  # Assuming the project's LLM interface is implemented in src.llm
+from src.agents.state import AgentState, Task, RetrievedChunk
 import logging
 
 # Configure logging
@@ -14,7 +13,7 @@ class VerificationAgent:
     The Verification Agent evaluates whether the retrieved context satisfies the current task.
     """
 
-    llm: LLM
+    llm: Any
 
     def verify(self, agent_state: AgentState) -> AgentState:
         """
@@ -30,24 +29,26 @@ class VerificationAgent:
             logger.info("Starting verification process.")
 
             # Step 1: Locate the active task
-            task = agent_state.current_task
+            task = next((t for t in agent_state.tasks if t.task_id == agent_state.current_task_id), None)
+            if not task and agent_state.tasks:
+                task = agent_state.tasks[0]
             if not task:
                 logger.warning("No active task found in AgentState.")
-                return self._update_agent_state(agent_state, True, "Skipped", "Supervisor")
+                return self._update_agent_state(agent_state, True, "Skipped", "Supervisor", None)
 
-            logger.info("Verifying task: %s", task.id)
+            logger.info("Verifying task: %s", task.task_id)
 
             # Step 2: Read retrieved chunks
             retrieved_chunks = agent_state.retrieved_context
 
             # Step 3: Fast Rule Evaluation
-            if agent_state.status in ["CONDITION_NOT_MET", "SKIPPED"]:
+            if getattr(task, 'status', None) in ["CONDITION_NOT_MET", "SKIPPED"]:
                 logger.info("Task skipped or condition not met. Marking context as valid.")
-                return self._update_agent_state(agent_state, True, "Skipped", "Supervisor")
+                return self._update_agent_state(agent_state, True, "Skipped", "Supervisor", task)
 
             if not retrieved_chunks:
-                logger.warning("No records found for task: %s", task.id)
-                return self._update_agent_state(agent_state, False, "No data found", "Supervisor")
+                logger.warning("No records found for task: %s", getattr(task, 'task_id', 'unknown'))
+                return self._update_agent_state(agent_state, False, "No data found", "Supervisor", task)
 
             # Step 4: Use LLM to evaluate the task description and retrieved context
             task_description = task.description
@@ -62,10 +63,10 @@ class VerificationAgent:
             # Step 5: Update AgentState based on LLM response
             if is_valid:
                 logger.info("LLM verified the context as valid.")
-                return self._update_agent_state(agent_state, True, "Valid context", "Supervisor")
+                return self._update_agent_state(agent_state, True, "Valid context", "Supervisor", task)
             else:
                 logger.info("LLM determined the context is invalid. Feedback: %s", feedback)
-                return self._update_agent_state(agent_state, False, feedback, "Supervisor")
+                return self._update_agent_state(agent_state, False, feedback, "Supervisor", task)
 
         except Exception as e:
             logger.error("Verification process failed: %s", str(e))
@@ -84,7 +85,7 @@ class VerificationAgent:
         return " ".join(chunk.text for chunk in chunks)
 
     def _update_agent_state(
-        self, agent_state: AgentState, is_context_valid: bool, feedback: str, next_agent: str
+        self, agent_state: AgentState, is_context_valid: bool, feedback: str, next_agent: str, task: Task
     ) -> AgentState:
         """
         Update the AgentState with verification results.
@@ -94,6 +95,7 @@ class VerificationAgent:
             is_context_valid (bool): Whether the context is valid.
             feedback (str): Feedback from the verification process.
             next_agent (str): The next agent to execute.
+            task (Task): The current task being verified.
 
         Returns:
             AgentState: The updated agent state.
@@ -101,6 +103,8 @@ class VerificationAgent:
         agent_state.is_context_valid = is_context_valid
         agent_state.verification_feedback = feedback
         agent_state.next_agent = next_agent
+        if task:
+            task.status = "verified" if is_context_valid else "failed_verification"
         return agent_state
 
 
@@ -113,30 +117,17 @@ class MockLLM:
         else:
             return {"is_valid": False, "feedback": "Context is invalid. Please refine your query."}
 
-# Example AgentState
-agent_state = AgentState(
-    current_task=Task(id="task1", description="Verify HR policies", target_domain="HR"),
-    retrieved_context=[
-        RetrievedChunk(chunk_id="1", document_name="doc1", text="This is a valid HR policy.", metadata={}, score=0.9),
-        RetrievedChunk(chunk_id="2", document_name="doc2", text="Another valid HR policy.", metadata={}, score=0.8),
-    ],
-    status="",
-    is_context_valid=False,
-    verification_feedback="",
-    next_agent="",
-)
+# --- Node Wrapper ---
+_verification_agent_instance = None
 
-if not agent_state or not agent_state.current_task:
-    logger.error("Invalid AgentState: Missing current task.")
-else:
-    # Initialize VerificationAgent
-    logger.info("Initializing VerificationAgent with MockLLM.")
-    verification_agent = VerificationAgent(llm=MockLLM())
-
-    # Perform verification
-    logger.info("Starting verification process.")
-    updated_state = verification_agent.verify(agent_state)
-
-    # Log and print updated AgentState
-    logger.info("Verification completed. Updated AgentState: %s", updated_state)
-    print(updated_state)
+def verification_node(state: AgentState) -> dict:
+    global _verification_agent_instance
+    if _verification_agent_instance is None:
+        _verification_agent_instance = VerificationAgent(llm=MockLLM())
+        
+    updated_state = _verification_agent_instance.verify(state)
+    return {
+        "is_context_valid": updated_state.is_context_valid,
+        "verification_feedback": getattr(updated_state, 'verification_feedback', None),
+        "next_agent": updated_state.next_agent
+    }

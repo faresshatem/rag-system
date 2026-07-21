@@ -10,6 +10,8 @@ class RetrievedChunk(BaseModel):
     file_name: str = Field(description="Name of the source file")
     text: str = Field(description="The actual text content extracted from the document")
     page: Optional[int] = Field(default=None, description="Page number where the chunk was found (can be null)")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata about the chunk")
+    score: Optional[float] = Field(default=None, description="Retrieval score")
 
 class Citation(BaseModel):
     span: str = Field(description="The specific text span in the generated answer")

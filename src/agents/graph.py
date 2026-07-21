@@ -8,6 +8,9 @@ from src.agents.state import AgentState
 from src.agents.supervisor import supervisor_node
 from src.agents.planning import query_planning_node
 from src.agents.structured import structured_data_node 
+from src.agents.retrieval import retrieval_node
+from src.agents.verification import verification_node
+from src.agents.synthesis import synthesis_node
 import uuid
 
 load_dotenv(find_dotenv())
@@ -87,7 +90,7 @@ async def build_graph():
     workflow.add_node("Query-Planning_Agent", query_planning_node)
     workflow.add_node("Structured_Data_Agent", structured_data_node)
     
-    # 2. Add Mock Nodes
+    # 2. Add Nodes
     workflow.add_node("Retrieval_Agent", mock_retrieval_node)
     workflow.add_node("Verification_Agent", mock_verification_node)
     workflow.add_node("Synthesis_Agent", mock_synthesis_node)

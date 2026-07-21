@@ -29,11 +29,11 @@ def get_current_user_context(token: str = Depends(security)) -> dict:
         )
     
     if role == "Admin":
-        return {"username": username, "domains": ALL_DOMAINS, "session_id": session_id}
+        return {"username": username, "domains": ALL_DOMAINS, "session_id": session_id, "role": role}
     elif role in ["HR", "IT"]:
         user_domains = [d.strip() for d in allowed_domains_str.split(",") if d.strip()]
         final_domains = [d for d in user_domains if d == role]
-        return {"username": username, "domains": final_domains, "session_id": session_id}
+        return {"username": username, "domains": final_domains, "session_id": session_id, "role": role}
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

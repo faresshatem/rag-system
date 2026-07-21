@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 from dataclasses import dataclass
-from src.models import AgentState, RetrievedChunk, Task
+from src.agents.state import AgentState, RetrievedChunk, Task
 import logging
 
 # Configure logging
@@ -35,8 +35,14 @@ class SynthesisAgent:
                 logger.error("Invalid retrieved chunks in AgentState.")
                 raise ValueError("AgentState contains invalid retrieved chunks.")
 
+            # Get current task
+            task = next((t for t in agent_state.tasks if t.task_id == agent_state.current_task_id), None)
+            if not task and agent_state.tasks:
+                task = agent_state.tasks[0]
+            target_domain = task.target_domain if task else agent_state.target_domain
+
             # Filter chunks by domain
-            retrieved_chunks = self._filter_chunks_by_domain(retrieved_chunks, agent_state.current_task.target_domain)
+            retrieved_chunks = self._filter_chunks_by_domain(retrieved_chunks, target_domain)
 
             # Handle edge cases
             if not retrieved_chunks:
@@ -84,25 +90,17 @@ class SynthesisAgent:
         """
         return [chunk for chunk in retrieved_chunks if chunk.metadata.get("domain") == target_domain]
 
+# --- Node Wrapper ---
+_synthesis_agent_instance = None
 
-# Example AgentState
-agent_state = AgentState(
-    status="NORMAL_RETRIEVAL",
-    retrieved_context=[
-        RetrievedChunk(chunk_id="1", document_name="doc1", text="This is the first chunk.", metadata={"domain": "HR"}, score=0.9),
-        RetrievedChunk(chunk_id="2", document_name="doc2", text="This is the second chunk.", metadata={"domain": "Finance"}, score=0.8),
-    ],
-    tasks=[
-        Task(id="task1", description="Retrieve HR policies", target_domain="HR"),
-    ],
-    verification_feedback="Valid context.",
-)
+def synthesis_node(state: AgentState) -> dict:
+    global _synthesis_agent_instance
+    if _synthesis_agent_instance is None:
+        _synthesis_agent_instance = SynthesisAgent()
+        
+    answer = _synthesis_agent_instance.synthesize(state)
+    return {
+        "answer": answer,
+        "next_agent": "END"
+    }
 
-# Initialize SynthesisAgent
-synthesis_agent = SynthesisAgent()
-
-# Generate response
-response = synthesis_agent.synthesize(agent_state)
-
-# Print the response
-print(response)

@@ -1,5 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, File, Form, UploadFile
 from fastapi.security import OAuth2PasswordRequestForm
+import tempfile
+import os
+import shutil
+from src.ingestion.doc_loader import DocumentLoader
 from sqlalchemy.orm import Session
 from .schemas import QueryRequest, QueryResponse, UserCreate, UserResponse, TokenResponse, IngestRequest
 from .database import get_db, User
@@ -86,19 +90,49 @@ async def run_query(payload: QueryRequest, request: Request, user_context: dict 
 
 
 @router.post("/ingest")
-def ingest_data(payload: IngestRequest, user_context: dict = Depends(get_current_user_context)):
+def ingest_data(
+    domain: str = Form(...),
+    file: UploadFile = File(...),
+    user_context: dict = Depends(get_current_user_context)
+):
     """
     Task 4 boundary applied to data uploading/ingestion.
     Ensures an HR employee cannot upload documents into the IT namespace.
+    Restricts data ingestion strictly to Admin users.
     """
-    allowed_domains = user_context.get("domains", [])
-    if payload.domain not in allowed_domains:
+    role = user_context.get("role")
+    if role != "Admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Write Access Denied: Your current role limits ingestion strictly to: {allowed_domains}"
+            detail="Access Denied: Only Administrators can perform Data Ingestion."
+        )
+
+    allowed_domains = user_context.get("domains", [])
+    if domain not in allowed_domains:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Write Access Denied: Target namespace {domain} is not in your allowed domains."
+        )
+        
+    # Save uploaded file temporarily
+    try:
+        suffix = os.path.splitext(file.filename)[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            shutil.copyfileobj(file.file, temp_file)
+            temp_file_path = temp_file.name
+
+        # Parse the document using doc_loader
+        docs = DocumentLoader.load(temp_file_path)
+        
+        # Clean up temp file
+        os.remove(temp_file_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process uploaded file: {str(e)}"
         )
         
     return {
         "status": "success", 
-        "message": f"Data securely written and parsed for target namespace: {payload.domain}"
+        "message": f"Successfully loaded and parsed {len(docs)} document chunk(s) from {file.filename} into namespace: {domain}"
     }
