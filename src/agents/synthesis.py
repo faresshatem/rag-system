@@ -1,106 +1,60 @@
-from typing import List, Dict, Any
-from dataclasses import dataclass
-from src.agents.state import AgentState, RetrievedChunk, Task
 import logging
+from typing import List
+
+from src.agents.state import AgentState, Citation, RetrievedChunk
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@dataclass
+
 class SynthesisAgent:
     """
-    The Synthesis Agent generates the final response for the user based on the AgentState.
+    The Synthesis Agent generates the final response for the user based on the
+    completed tasks and the retrieved context accumulated in the AgentState.
     """
 
-    def synthesize(self, agent_state: AgentState) -> str:
-        """
-        Synthesize the final response for the user based on the AgentState.
+    def _read_task_summaries(self, state: AgentState) -> List[str]:
+        finished_tasks = [t for t in state.tasks if t.status in ("completed", "failed", "skipped")]
+        return [str(t.result_summary) for t in finished_tasks if t.result_summary]
 
-        Args:
-            agent_state (AgentState): The complete state of the agent.
+    def _build_citations(self, chunks: List[RetrievedChunk]) -> List[Citation]:
+        return [
+            Citation(
+                span=chunk.text[:200],
+                source_file=chunk.file_name,
+                chunk_id=chunk.chunk_id,
+                page=chunk.page,
+            )
+            for chunk in chunks
+        ]
 
-        Returns:
-            str: The synthesized response.
-        """
-        try:
-            logger.info("Starting synthesis process.")
+    def synthesize(self, state: AgentState) -> dict:
+        logger.info("Starting synthesis process.")
 
-            # Step 1: Read execution history
-            task_summaries = self._read_task_summaries(agent_state)
-            retrieved_chunks = agent_state.retrieved_context
+        summaries = self._read_task_summaries(state)
+        retrieved_chunks = state.retrieved_context
 
-            # Validate retrieved chunks
-            if not all(isinstance(chunk, RetrievedChunk) for chunk in retrieved_chunks):
-                logger.error("Invalid retrieved chunks in AgentState.")
-                raise ValueError("AgentState contains invalid retrieved chunks.")
+        if summaries:
+            final_answer = "Based on the retrieved policies and database lookups:\n" + "\n\n".join(summaries)
+        else:
+            final_answer = "I couldn't find any specific answers for your query, but how can I help you generally?"
 
-            # Get current task
-            task = next((t for t in agent_state.tasks if t.task_id == agent_state.current_task_id), None)
-            if not task and agent_state.tasks:
-                task = agent_state.tasks[0]
-            target_domain = task.target_domain if task else agent_state.target_domain
+        citations = self._build_citations(retrieved_chunks) if retrieved_chunks else None
 
-            # Filter chunks by domain
-            retrieved_chunks = self._filter_chunks_by_domain(retrieved_chunks, target_domain)
+        logger.info("Synthesis completed. %d task summaries, %d citations.", len(summaries), len(citations or []))
 
-            # Handle edge cases
-            if not retrieved_chunks:
-                logger.warning("No retrieved chunks available for synthesis.")
-                return "No relevant information was found."
+        return {
+            "next_agent": "END",
+            "answer": final_answer,
+            "citations": citations,
+        }
 
-            # Incorporate verification feedback
-            verification_feedback = agent_state.verification_feedback
-            if verification_feedback:
-                logger.info("Incorporating verification feedback into the response.")
 
-            # Generate response
-            response = "Here is the information you requested:\n"
-            for chunk in retrieved_chunks:
-                response += f"- {chunk.text} [{chunk.chunk_id}]\n"
+_synthesis_agent = SynthesisAgent()
 
-            return response
-
-        except Exception as e:
-            logger.error("Synthesis process failed: %s", str(e))
-            raise
-
-    def _read_task_summaries(self, agent_state: AgentState) -> List[str]:
-        """
-        Read task summaries from the AgentState.
-
-        Args:
-            agent_state (AgentState): The complete state of the agent.
-
-        Returns:
-            List[str]: A list of task summaries.
-        """
-        return [task.description for task in agent_state.tasks]
-
-    def _filter_chunks_by_domain(self, retrieved_chunks: List[RetrievedChunk], target_domain: str) -> List[RetrievedChunk]:
-        """
-        Filter retrieved chunks by the target domain.
-
-        Args:
-            retrieved_chunks (List[RetrievedChunk]): The retrieved chunks.
-            target_domain (str): The target domain to filter chunks.
-
-        Returns:
-            List[RetrievedChunk]: The filtered chunks.
-        """
-        return [chunk for chunk in retrieved_chunks if chunk.metadata.get("domain") == target_domain]
-
-# --- Node Wrapper ---
-_synthesis_agent_instance = None
 
 def synthesis_node(state: AgentState) -> dict:
-    global _synthesis_agent_instance
-    if _synthesis_agent_instance is None:
-        _synthesis_agent_instance = SynthesisAgent()
-        
-    answer = _synthesis_agent_instance.synthesize(state)
-    return {
-        "answer": answer,
-        "next_agent": "END"
-    }
-
+    """LangGraph node wrapper around SynthesisAgent.synthesize()."""
+    print("\n[Synthesis Agent] Generating final answer from all task results...")
+    return _synthesis_agent.synthesize(state)
