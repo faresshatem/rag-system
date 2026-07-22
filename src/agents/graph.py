@@ -8,6 +8,11 @@ from src.agents.state import AgentState
 from src.agents.supervisor import supervisor_node
 from src.agents.planning import query_planning_node
 from src.agents.structured import structured_data_node 
+from src.agents.retrieval import retrieval_node
+from src.agents.verification import verification_node
+from src.agents.synthesis import synthesis_node
+from src.agents.casual_chat import casual_chat_node
+from src.agents.intent_router import intent_router_node
 import uuid
 
 load_dotenv(find_dotenv())
@@ -65,26 +70,39 @@ def mock_verification_node(state: AgentState):
 
 def mock_synthesis_node(state: AgentState):
     print("\n[Mock Synthesis] Generating final text based on everything...")
+    finished_tasks = [t for t in state.tasks if t.status in ('completed', 'failed', 'skipped')]
+    
+    if finished_tasks:
+        summaries = [str(t.result_summary) for t in finished_tasks if t.result_summary]
+        final_answer = "Based on the retrieved policies and database lookups:\n" + "\n\n".join(summaries)
+    else:
+        final_answer = "I couldn't find any specific answers for your query, but how can I help you generally?"
+        
     return {
-        "next_agent": "END"
+        "next_agent": "END",
+        "answer": final_answer
     }
+
+
 
 
 async def build_graph():
     workflow = StateGraph(AgentState)
     
     # 1. Add Real Nodes
+    workflow.add_node("Intent_Router_Agent", intent_router_node)
     workflow.add_node("Supervisor", supervisor_node)
     workflow.add_node("Query-Planning_Agent", query_planning_node)
     workflow.add_node("Structured_Data_Agent", structured_data_node)
     
-    # 2. Add Mock Nodes
+    # 2. Add Nodes
     workflow.add_node("Retrieval_Agent", mock_retrieval_node)
     workflow.add_node("Verification_Agent", mock_verification_node)
     workflow.add_node("Synthesis_Agent", mock_synthesis_node)
+    workflow.add_node("Casual_Chat_Agent", casual_chat_node)
 
     # 3. Entry Point
-    workflow.add_edge(START, "Supervisor")
+    workflow.add_edge(START, "Intent_Router_Agent")
     
     # 4. Supervisor Routing Logic
     def router(state: AgentState):
@@ -92,14 +110,16 @@ async def build_graph():
             return END
         return state.next_agent
         
+    workflow.add_conditional_edges("Intent_Router_Agent", router)
     workflow.add_conditional_edges("Supervisor", router)
+    workflow.add_conditional_edges("Query-Planning_Agent", router)
     
     # 5. Fixed Edges 
-    workflow.add_edge("Query-Planning_Agent", "Supervisor")
     workflow.add_edge("Structured_Data_Agent", "Verification_Agent")
     workflow.add_edge("Retrieval_Agent", "Verification_Agent")
     workflow.add_edge("Verification_Agent", "Supervisor")
     workflow.add_edge("Synthesis_Agent", END)
+    workflow.add_edge("Casual_Chat_Agent", END)
     
     # 6. Memory Setup
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -109,33 +129,3 @@ async def build_graph():
     
     app = workflow.compile(checkpointer=memory)
     return app
-
-
-async def main():
-    app = await build_graph()
-    
-    session_id = f"session_{uuid.uuid4().hex[:8]}"
-    config = {"configurable": {"thread_id": session_id}}
-    print(f"Starting new chat session with thread_id: {session_id}")
-    
-    initial_state = {
-        "messages": [{"role": "user", "content": "hi , how are you ? tell me about ai"}],
-        "allowed_domains": ["HR","IT"],
-        "step_count": 0,
-        "tasks": []
-    }
-  
-    print("🚀 Starting Local Graph Execution...\n" + "="*40)
-    
-    async for event in app.astream(initial_state, config=config):
-        for key, value in event.items():
-            print(f"\n🟢 --- Output from Node: {key} ---")
-            
-            for k, v in value.items():
-                if v is not None and k not in ["messages", "retrieved_context"]: 
-                    print(f"   ➤ {k}: {v}")
-                elif k == "retrieved_context" and v:
-                    print(f"   ➤ retrieved_context: [List containing {len(v)} chunk(s)]")
-
-if __name__ == "__main__":
-    asyncio.run(main())

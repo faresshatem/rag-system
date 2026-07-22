@@ -33,12 +33,17 @@ class DenseSearch:
             collection_name (str): The name of the Qdrant collection to search.
             top_k (int): Number of top results to retrieve.
         """
-        self.qdrant_url = qdrant_url
-        self.collection_name = collection_name or os.getenv("QDRANT_COLLECTION_NAME")
+        self.qdrant_url = qdrant_url or os.getenv("QDRANT_URL", "http://localhost:6333")
+        self.collection_name = (
+            collection_name
+            or os.getenv("QDRANT_COLLECTION")
+            or os.getenv("QDRANT_COLLECTION_NAME")
+            or "documents"
+        )
         self.top_k = top_k
 
         if not self.collection_name:
-            raise ValueError("Collection name must be provided or set in the environment variable 'QDRANT_COLLECTION_NAME'.")
+            raise ValueError("Collection name must be provided or set in the environment variable 'QDRANT_COLLECTION'.")
 
         try:
             self.qdrant_client = QdrantClient(url=self.qdrant_url)
@@ -143,21 +148,22 @@ class DenseSearch:
             raise
 
 
-try:
-    # Initialize DenseSearch
-    dense_search = DenseSearch(qdrant_url="http://localhost:6333", collection_name="my_collection", top_k=5)
+if __name__ == "__main__":
+    try:
+        # Initialize DenseSearch
+        dense_search = DenseSearch(qdrant_url="http://localhost:6333", collection_name="my_collection", top_k=5)
 
-    # Perform a search
-    results = dense_search.search(
-        query="What are the HR policies for remote work?",
-        domain="HR",
-        metadata={"policy_type": "remote_work"},
-        top_k=3
-    )
+        # Perform a search
+        results = dense_search.search(
+            query="What are the HR policies for remote work?",
+            domain="HR",
+            metadata={"policy_type": "remote_work"},
+            top_k=3
+        )
 
-    # Print results
-    for result in results:
-        print(result)
+        # Print results
+        for result in results:
+            print(result)
 
-except Exception as e:
-    logger.error("An error occurred during the dense search: %s", str(e))
+    except Exception as e:
+        logger.error("An error occurred during the dense search: %s", str(e))

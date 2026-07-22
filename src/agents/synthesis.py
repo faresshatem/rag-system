@@ -1,173 +1,60 @@
-from typing import List, Dict, Any
-from dataclasses import dataclass
-from src.models import AgentState, RetrievedChunk, Task
 import logging
+from typing import List
+
+from src.agents.state import AgentState, Citation, RetrievedChunk
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@dataclass
+
 class SynthesisAgent:
     """
-    The Synthesis Agent generates the final response for the user based on the AgentState.
+    The Synthesis Agent generates the final response for the user based on the
+    completed tasks and the retrieved context accumulated in the AgentState.
     """
 
-    def synthesize(self, agent_state: AgentState) -> str:
-        """
-        Synthesize the final response for the user based on the AgentState.
+    def _read_task_summaries(self, state: AgentState) -> List[str]:
+        finished_tasks = [t for t in state.tasks if t.status in ("completed", "failed", "skipped")]
+        return [str(t.result_summary) for t in finished_tasks if t.result_summary]
 
-        Args:
-            agent_state (AgentState): The complete state of the agent.
+    def _build_citations(self, chunks: List[RetrievedChunk]) -> List[Citation]:
+        return [
+            Citation(
+                span=chunk.text[:200],
+                source_file=chunk.file_name,
+                chunk_id=chunk.chunk_id,
+                page=chunk.page,
+            )
+            for chunk in chunks
+        ]
 
-        Returns:
-            str: The synthesized response.
-        """
-        try:
-            logger.info("Starting synthesis process.")
+    def synthesize(self, state: AgentState) -> dict:
+        logger.info("Starting synthesis process.")
 
-            # Step 1: Read execution history
-            task_summaries = self._read_task_summaries(agent_state)
-            retrieved_chunks = agent_state.retrieved_context
-            verification_feedback = agent_state.verification_feedback
+        summaries = self._read_task_summaries(state)
+        retrieved_chunks = state.retrieved_context
 
-            # Step 2: Handle scenarios
-            if agent_state.status == "CONDITION_NOT_MET":
-                logger.info("Task was skipped due to unmet conditions.")
-                return self._handle_conditional_skip(verification_feedback)
+        if summaries:
+            final_answer = "Based on the retrieved policies and database lookups:\n" + "\n\n".join(summaries)
+        else:
+            final_answer = "I couldn't find any specific answers for your query, but how can I help you generally?"
 
-            if agent_state.status == "ACCESS_DENIED":
-                logger.info("Access denied due to RBAC restrictions.")
-                return self._handle_access_denied()
+        citations = self._build_citations(retrieved_chunks) if retrieved_chunks else None
 
-            if agent_state.status == "NO_RECORDS":
-                logger.info("No records found for the task.")
-                return self._handle_no_records()
+        logger.info("Synthesis completed. %d task summaries, %d citations.", len(summaries), len(citations or []))
 
-            if agent_state.status == "CASUAL_CONVERSATION":
-                logger.info("Handling casual conversation scenario.")
-                return self._handle_casual_conversation(agent_state)
-
-            if agent_state.status == "MIXED_RESULTS":
-                logger.info("Handling mixed results scenario.")
-                return self._handle_mixed_results(task_summaries, retrieved_chunks)
-
-            # Step 3: Normal Retrieval
-            logger.info("Handling normal retrieval scenario.")
-            return self._handle_normal_retrieval(retrieved_chunks)
-
-        except Exception as e:
-            logger.error("Synthesis process failed: %s", str(e))
-            raise
-
-    def _read_task_summaries(self, agent_state: AgentState) -> List[str]:
-        """
-        Read task summaries from the AgentState.
-
-        Args:
-            agent_state (AgentState): The complete state of the agent.
-
-        Returns:
-            List[str]: A list of task summaries.
-        """
-        return [task.description for task in agent_state.tasks]
-
-    def _handle_conditional_skip(self, feedback: str) -> str:
-        """
-        Handle the conditional skip scenario.
-
-        Args:
-            feedback (str): The feedback explaining why the task was skipped.
-
-        Returns:
-            str: The response for the conditional skip scenario.
-        """
-        return f"The task was skipped: {feedback}"
-
-    def _handle_access_denied(self) -> str:
-        """
-        Handle the access denied scenario.
-
-        Returns:
-            str: The response for the access denied scenario.
-        """
-        return "Access to the requested information is restricted due to RBAC policies."
-
-    def _handle_no_records(self) -> str:
-        """
-        Handle the no records scenario.
-
-        Returns:
-            str: The response for the no records scenario.
-        """
-        return "No relevant information was found for the requested task."
-
-    def _handle_casual_conversation(self, agent_state: AgentState) -> str:
-        """
-        Handle the casual conversation scenario.
-
-        Args:
-            agent_state (AgentState): The complete state of the agent.
-
-        Returns:
-            str: The response for the casual conversation scenario.
-        """
-        return "This is a casual conversation. How can I assist you further?"
-
-    def _handle_mixed_results(self, task_summaries: List[str], retrieved_chunks: List[RetrievedChunk]) -> str:
-        """
-        Handle the mixed results scenario.
-
-        Args:
-            task_summaries (List[str]): The summaries of the tasks.
-            retrieved_chunks (List[RetrievedChunk]): The retrieved chunks.
-
-        Returns:
-            str: The response for the mixed results scenario.
-        """
-        response = "The results for your request are as follows:\n"
-        for chunk in retrieved_chunks:
-            response += f"- {chunk.text} [{chunk.chunk_id}]\n"
-        return response
-
-    def _handle_normal_retrieval(self, retrieved_chunks: List[RetrievedChunk]) -> str:
-        """
-        Handle the normal retrieval scenario.
-
-        Args:
-            retrieved_chunks (List[RetrievedChunk]): The retrieved chunks.
-
-        Returns:
-            str: The response for the normal retrieval scenario.
-        """
-        if not retrieved_chunks:
-            logger.warning("No retrieved chunks available for normal retrieval.")
-            return "No relevant information was found."
-
-        response = "Here is the information you requested:\n"
-        for chunk in retrieved_chunks:
-            response += f"- {chunk.text} [{chunk.chunk_id}]\n"
-        return response
+        return {
+            "next_agent": "END",
+            "answer": final_answer,
+            "citations": citations,
+        }
 
 
-# Example AgentState
-agent_state = AgentState(
-    status="NORMAL_RETRIEVAL",
-    retrieved_context=[
-        RetrievedChunk(chunk_id="1", document_name="doc1", text="This is the first chunk.", metadata={}, score=0.9),
-        RetrievedChunk(chunk_id="2", document_name="doc2", text="This is the second chunk.", metadata={}, score=0.8),
-    ],
-    tasks=[
-        Task(id="task1", description="Retrieve HR policies", target_domain="HR"),
-    ],
-    verification_feedback="Valid context.",
-)
+_synthesis_agent = SynthesisAgent()
 
-# Initialize SynthesisAgent
-synthesis_agent = SynthesisAgent()
 
-# Generate response
-response = synthesis_agent.synthesize(agent_state)
-
-# Print the response
-print(response)
+def synthesis_node(state: AgentState) -> dict:
+    """LangGraph node wrapper around SynthesisAgent.synthesize()."""
+    print("\n[Synthesis Agent] Generating final answer from all task results...")
+    return _synthesis_agent.synthesize(state)

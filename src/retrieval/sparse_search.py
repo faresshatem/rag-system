@@ -114,24 +114,25 @@ class SparseSearch:
             logger.error("Search failed: %s", str(e))
             raise
 
-# Example documents
-documents = [
-    Document(id="1", text="This is the first document.", metadata={"document_name": "doc1", "domain": "HR"}),
-    Document(id="2", text="This is the second document.", metadata={"document_name": "doc2", "domain": "IT"}),
-    Document(id="3", text="This is the third document.", metadata={"document_name": "doc3", "domain": "Finance"}),
-]
+if __name__ == "__main__":
+    # Example documents
+    documents = [
+        Document(id="1", text="This is the first document.", metadata={"document_name": "doc1", "domain": "HR"}),
+        Document(id="2", text="This is the second document.", metadata={"document_name": "doc2", "domain": "IT"}),
+        Document(id="3", text="This is the third document.", metadata={"document_name": "doc3", "domain": "Finance"}),
+    ]
 
-# Initialize SparseSearch
-sparse_search = SparseSearch()
+    # Initialize SparseSearch
+    sparse_search = SparseSearch()
 
-# Index documents
-sparse_search.index_documents(documents)
+    # Index documents
+    sparse_search.index_documents(documents)
 
-# Perform a search
-query = "first document"
-results = sparse_search.search(query, top_k=2)
+    # Perform a search
+    query = "first document"
+    results = sparse_search.search(query, top_k=2)
 
-# Print results
-for result in results:
-    logger.info("Search result: %s", result)
+    # Print results
+    for result in results:
+        logger.info("Search result: %s", result)
     

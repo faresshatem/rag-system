@@ -10,7 +10,7 @@ def is_domain_sensitive(domain: str) -> bool:
     return domain.upper() in SENSITIVE_DOMAINS
 
 def get_routed_llm(state: AgentState):
-    if state.next_agent in ["Supervisor", "Query-Planning_Agent"]:
+    if state.next_agent in ["Supervisor", "Query-Planning_Agent" , "Casual_Chat_Agent"]:
         return get_llm(use_local=False, temperature=0.0)
         
     if state.target_domain:
