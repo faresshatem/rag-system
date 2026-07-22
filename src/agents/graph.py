@@ -11,8 +11,8 @@ from src.agents.structured import structured_data_node
 from src.agents.retrieval import retrieval_node
 from src.agents.verification import verification_node
 from src.agents.synthesis import synthesis_node
-from src.generation.router import get_routed_llm
-from langchain_core.prompts import ChatPromptTemplate
+from src.agents.casual_chat import casual_chat_node
+from src.agents.intent_router import intent_router_node
 import uuid
 
 load_dotenv(find_dotenv())
@@ -83,29 +83,14 @@ def mock_synthesis_node(state: AgentState):
         "answer": final_answer
     }
 
-def casual_chat_node(state: AgentState):
-    print("\n[Casual Chat] Handling conversational query without saving to history/summary...")
-    llm = get_routed_llm(state)
-    user_query = state.messages[0].content if state.messages else ""
-    
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a helpful and polite AI assistant. Respond conversationally to the user's greeting or general question. Do not attempt to search internal databases."),
-        ("user", "{query}")
-    ])
-    
-    res = (prompt | llm).invoke({"query": user_query})
-    
-    # Return answer but explicitly DO NOT append to messages (history) or tasks (summary)
-    return {
-        "answer": res.content,
-        "next_agent": "END"
-    }
+
 
 
 async def build_graph():
     workflow = StateGraph(AgentState)
     
     # 1. Add Real Nodes
+    workflow.add_node("Intent_Router_Agent", intent_router_node)
     workflow.add_node("Supervisor", supervisor_node)
     workflow.add_node("Query-Planning_Agent", query_planning_node)
     workflow.add_node("Structured_Data_Agent", structured_data_node)
@@ -117,7 +102,7 @@ async def build_graph():
     workflow.add_node("Casual_Chat_Agent", casual_chat_node)
 
     # 3. Entry Point
-    workflow.add_edge(START, "Supervisor")
+    workflow.add_edge(START, "Intent_Router_Agent")
     
     # 4. Supervisor Routing Logic
     def router(state: AgentState):
@@ -125,15 +110,11 @@ async def build_graph():
             return END
         return state.next_agent
         
+    workflow.add_conditional_edges("Intent_Router_Agent", router)
     workflow.add_conditional_edges("Supervisor", router)
+    workflow.add_conditional_edges("Query-Planning_Agent", router)
     
-    # 5. Fixed & Conditional Edges 
-    def planner_router(state: AgentState):
-        if state.query_intent == "casual_chat":
-            return "Casual_Chat_Agent"
-        return "Supervisor"
-
-    workflow.add_conditional_edges("Query-Planning_Agent", planner_router)
+    # 5. Fixed Edges 
     workflow.add_edge("Structured_Data_Agent", "Verification_Agent")
     workflow.add_edge("Retrieval_Agent", "Verification_Agent")
     workflow.add_edge("Verification_Agent", "Supervisor")

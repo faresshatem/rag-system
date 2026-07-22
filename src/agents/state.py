@@ -33,6 +33,10 @@ class AgentState(BaseModel):
         default_factory=list, 
         description="Array of chat messages (User query, Assistant replies)"
     )
+    casual_chat_history: List[Message] = Field(
+        default_factory=list,
+        description="Dedicated history for casual chat to prevent polluting the main RAG context"
+    )
     next_agent: Optional[str] = Field(
         default=None, 
         description="Determines the next agent in the execution graph (e.g., 'Supervisor', 'Retrieval_Agent', or 'END')"

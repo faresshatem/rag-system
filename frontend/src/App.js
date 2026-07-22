@@ -17,8 +17,8 @@ function App() {
   const [role, setRole] = useState('');
 
   useEffect(() => {
-    const token = localStorage.getItem('access_token');
-    const storedUsername = localStorage.getItem('username');
+    const token = sessionStorage.getItem('access_token');
+    const storedUsername = sessionStorage.getItem('username');
     if (token) {
       const decoded = decodeToken(token);
       if (decoded && decoded.role) {
@@ -32,10 +32,10 @@ function App() {
   const handleLogin = (user, tokenStr) => {
     setIsAuthenticated(true);
     setUsername(user);
-    localStorage.setItem('username', user);
+    sessionStorage.setItem('username', user);
     
     // Decode token to get role
-    const token = tokenStr || localStorage.getItem('access_token');
+    const token = tokenStr || sessionStorage.getItem('access_token');
     if (token) {
       const decoded = decodeToken(token);
       if (decoded && decoded.role) {
@@ -45,8 +45,8 @@ function App() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('username');
+    sessionStorage.removeItem('access_token');
+    sessionStorage.removeItem('username');
     setIsAuthenticated(false);
     setUsername('');
   };

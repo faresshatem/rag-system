@@ -6,7 +6,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy import text
 from src.agents.state import AgentState, RetrievedChunk
 from src.generation.router import get_routed_llm
-from src.database.connection import engine
+from src.database.connection import llm_engine
 from redis.asyncio import Redis as AsyncRedis
 
 class SQLQueryOutput(BaseModel):
@@ -48,6 +48,17 @@ async def structured_data_node(state: AgentState) -> dict:
         history_context += f"Task {idx+1}: {t.description}\nResult: {res_summary}\n\n"
         
     llm = get_routed_llm(state)
+    
+    # 1. Pre-process: Translate Arabic names/terms to English using a dedicated LLM call
+    print(f"\n[Structured Agent] Translating task description if needed...")
+    translation_prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are an expert translator. Your only task is to translate any Arabic text into English and transliterate any Arabic names (e.g., 'أحمد' to 'ahmed', 'حسن' to 'hassan') in the following task description. Map Arabic terms to their logical English counterparts if it makes sense in a database context (e.g., 'مرضي' to 'SICK'). Leave English text as is. Output ONLY the translated/transliterated task description, nothing else."),
+        ("user", "{task}")
+    ])
+    translation_response = await (translation_prompt | llm).ainvoke({"task": task_desc})
+    translated_task_desc = translation_response.content.strip()
+    print(f"   -> Translated Task: {translated_task_desc}")
+    
     structured_llm = llm.with_structured_output(SQLQueryOutput)
     
     prompt = ChatPromptTemplate.from_messages([
@@ -69,7 +80,6 @@ async def structured_data_node(state: AgentState) -> dict:
         - Write ONLY a valid PostgreSQL SELECT statement.
         - If the task mentions a user by name or username, ALWAYS use a JOIN with the 'users' table and filter by 'full_name' using ILIKE.
         - If the username contains underscores (e.g., 'ahmed_hassan'), replace the underscores with spaces and use wildcards (e.g., ILIKE '%ahmed hassan%') when filtering 'full_name'.
-        - TRANSLATION MANDATE: If the task description or any entities/names are provided in Arabic, you MUST translate and transliterate them into their English equivalents before using them in the SQL query, as the database only stores English values. For example, convert "أحمد" to "ahmed", "حسن" to "hassan", and map Arabic terms to database enums (e.g., "مرضي" to 'SICK').
         - CRITICAL: You MUST ALWAYS include both the 'id' (from the users table) and the 'full_name' column in your SELECT statement. This ensures the system can verify the user AND passes the exact user ID to subsequent tasks in the execution history.
         - CRITICAL CONDITIONAL LOGIC: If the Task Description contains a condition (e.g., "If the ticket is 'RESOLVED'...") AND you see from the Previous Execution History that this condition is FALSE, you MUST NOT generate a valid SQL query. Instead, output EXACTLY the phrase: "CONDITION_NOT_MET".
         """),
@@ -80,11 +90,23 @@ async def structured_data_node(state: AgentState) -> dict:
         response = await (prompt | structured_llm).ainvoke({
             "domain": target_domain,
             "schema": domain_schema,
-            "task": task_desc,
+            "task": translated_task_desc,
             "history": history_context if history_context else "No previous tasks."
         })
         sql_query = response.sql_query
         
+        if sql_query.strip() != "CONDITION_NOT_MET":
+            # 2. Query Safety Validation
+            print(f"\n[Structured Agent] Validating SQL query safety...")
+            safety_prompt = ChatPromptTemplate.from_messages([
+                ("system", "You are a SQL security checker. Examine the following SQL query. If it is purely a SELECT query that reads data and does not modify the database in any way (no INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, etc.), output exactly 'SAFE'. If it contains any modifying operations, output exactly 'UNSAFE'."),
+                ("user", "{query}")
+            ])
+            safety_response = await (safety_prompt | llm).ainvoke({"query": sql_query})
+            if safety_response.content.strip().upper() != "SAFE":
+                raise ValueError("Query validation failed: the query is UNSAFE as it contains data modification operations. Only SELECT is allowed.")
+            print(f"   -> Query is SAFE.")
+
         if sql_query.strip() == "CONDITION_NOT_MET":
             print(f"\n[Structured Agent] Task Skipped: Condition not met based on history.\n")
             result_text = "Task Skipped: The condition specified in the task description was not met based on previous results."
@@ -104,7 +126,7 @@ async def structured_data_node(state: AgentState) -> dict:
             else:
                 print(f"\n[Structured Agent] Executing SQL: {sql_query}\n")
                 
-                async with engine.begin() as conn:
+                async with llm_engine.begin() as conn:
                     result = await conn.execute(text(sql_query))
                     rows = result.fetchall()
                     keys = result.keys()

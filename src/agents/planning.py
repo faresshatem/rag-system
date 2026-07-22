@@ -13,7 +13,6 @@ class TaskDefinition(BaseModel):
 
 class PlannerOutput(BaseModel):
     thought_process: str = Field(description="Chain of Thought: Analyze the query and break it down into a sequence of logical steps.")
-    query_intent: str = Field(description="Must be 'casual_chat', 'information_retrieval', or 'ready_for_synthesis'")
     plan: List[TaskDefinition] = Field(default_factory=list, description="An ordered list of ALL tasks required to answer the user query completely.")
 
 def query_planning_node(state: AgentState) -> dict:
@@ -42,12 +41,7 @@ def query_planning_node(state: AgentState) -> dict:
         3. CONTEXTUAL REWRITING: The `description` of each task must be explicit. When the user refers to "my" or "I" (e.g. "my ticket"), you MUST replace it with their actual username: '{username}'.
         4. DEPENDENCY TRACKING: For each task, evaluate if it depends on a previous task. Set `is_dependent` to the string 'true' ONLY if it needs data or a successful outcome from a previous task. Set it to the string 'false' if it can run independently (e.g., asking two unrelated questions like leave balance and CEO tickets).
         5. The plan is generated ONCE. Do not expect to replan. Provide the full plan upfront.
-        INTENT CLASSIFICATION AND TASK RULES:
-        1. "information_retrieval": Use this ONLY if the user is asking for specific internal company data, IT tickets, HR leave balances, or company policies.
-        2. "casual_chat": Use this for greetings (e.g., "hi", "how are you"), small talk, AND general world knowledge questions (e.g., "tell me about AI", "what is Python?"). 
-
-        CRITICAL CONSTRAINT for 'casual_chat':
-        If the query intent is "casual_chat", you MUST return an EMPTY tasks list ([]). DO NOT create any tasks for general knowledge or casual conversations.
+        
         Completed Tasks History:
         {history}
         """),
@@ -63,14 +57,9 @@ def query_planning_node(state: AgentState) -> dict:
             "history": task_history if task_history else "No previous tasks."
         })
         
-        intent = str(response.query_intent).strip().lower().replace(" ", "_")
-        updates = {"query_intent": intent}
+        updates = {}
         
-        if intent == "casual_chat":
-            updates["next_agent"] = "Casual_Chat_Agent"
-            updates["current_task_id"] = None
-            updates["query_intent"] = "casual_chat"
-        elif intent == "ready_for_synthesis" or not response.plan:
+        if not response.plan:
             updates["next_agent"] = "Synthesis_Agent"
             updates["current_task_id"] = None
             updates["query_intent"] = "ready_for_synthesis"

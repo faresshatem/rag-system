@@ -105,14 +105,14 @@ const Auth = ({ onLogin }) => {
     try {
       if (isLogin) {
         const data = await login(formData.username, formData.password);
-        localStorage.setItem('access_token', data.access_token);
+        sessionStorage.setItem('access_token', data.access_token);
         onLogin(formData.username);
       } else {
         const role = formData.allowed_domains === 'Admin' ? 'Admin' : 'User';
         const domain = formData.allowed_domains === 'Admin' ? '' : formData.allowed_domains;
         await register(formData.username, formData.password, role, domain);
         const data = await login(formData.username, formData.password);
-        localStorage.setItem('access_token', data.access_token);
+        sessionStorage.setItem('access_token', data.access_token);
         onLogin(formData.username);
       }
     } catch (err) {
