@@ -13,6 +13,7 @@ from src.agents.verification import verification_node
 from src.agents.synthesis import synthesis_node
 from src.generation.router import get_routed_llm
 from langchain_core.prompts import ChatPromptTemplate
+from src.agents.memory import memory_summarization_node
 import uuid
 
 load_dotenv(find_dotenv())
@@ -106,18 +107,19 @@ async def build_graph():
     workflow = StateGraph(AgentState)
     
     # 1. Add Real Nodes
+    workflow.add_node("Memory_Agent", memory_summarization_node) 
     workflow.add_node("Supervisor", supervisor_node)
     workflow.add_node("Query-Planning_Agent", query_planning_node)
     workflow.add_node("Structured_Data_Agent", structured_data_node)
     
-    # 2. Add Nodes
+    # 2. Add Mock Nodes
     workflow.add_node("Retrieval_Agent", mock_retrieval_node)
     workflow.add_node("Verification_Agent", mock_verification_node)
     workflow.add_node("Synthesis_Agent", mock_synthesis_node)
     workflow.add_node("Casual_Chat_Agent", casual_chat_node)
 
-    # 3. Entry Point
-    workflow.add_edge(START, "Supervisor")
+    workflow.add_edge(START, "Memory_Agent")
+    workflow.add_edge("Memory_Agent", "Supervisor")
     
     # 4. Supervisor Routing Logic
     def router(state: AgentState):

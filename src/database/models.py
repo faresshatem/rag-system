@@ -31,7 +31,6 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     full_name = Column(String(100), nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=False)
-    department = Column(String(50), nullable=False) # e.g., 'Engineering', 'Sales'
     role = Column(String(50), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -40,7 +39,7 @@ class User(Base):
     it_tickets = relationship("ITTicket", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<User(full_name='{self.full_name}', department='{self.department}')>"
+        return f"<User(full_name='{self.full_name}', role='{self.role}')>"
 
 
 class HRLeaveBalance(Base):

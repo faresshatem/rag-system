@@ -15,14 +15,14 @@ class SQLQueryOutput(BaseModel):
 DOMAIN_SCHEMAS = {
     "HR": """
     Table: users
-    Columns: id (INTEGER PRIMARY KEY), full_name (VARCHAR), email (VARCHAR), department (VARCHAR), role (VARCHAR)
+    Columns: id (INTEGER PRIMARY KEY), full_name (VARCHAR), email (VARCHAR), role (VARCHAR)
     
     Table: hr_leave_balances
     Columns: id (INTEGER PRIMARY KEY), user_id (INTEGER FOREIGN KEY REFERENCES users(id)), leave_type (ENUM: 'ANNUAL', 'SICK', 'MATERNITY', 'UNPAID'), available_days (INTEGER), used_days (INTEGER)
     """,
     "IT": """
     Table: users
-    Columns: id (INTEGER PRIMARY KEY), full_name (VARCHAR), email (VARCHAR), department (VARCHAR), role (VARCHAR)
+    Columns: id (INTEGER PRIMARY KEY), full_name (VARCHAR), email (VARCHAR), role (VARCHAR)
     
     Table: it_tickets
     Columns: id (INTEGER PRIMARY KEY), user_id (INTEGER FOREIGN KEY REFERENCES users(id)), title (VARCHAR), description (TEXT), status (ENUM: 'OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'), priority (ENUM: 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL')
@@ -65,11 +65,15 @@ async def structured_data_node(state: AgentState) -> dict:
         Previous Execution History:
         {history}
         
-        RULES:
+        RULES FOR SQL GENERATION:
+        - MATH & COMPARISONS: When the task requires comparing two columns (e.g., used days vs available days), write valid PostgreSQL math comparisons in the WHERE clause (e.g., WHERE used_days > available_days). DO NOT invent SQL functions or columns that are not in the ALLOWED SCHEMA.
+        - AVOID OVER-FILTERING: Ignore conversational filler verbs or implied actions (e.g., "قدمت", "عملت", "applied"). Do NOT add WHERE clauses for dates or specific leave_types unless the user explicitly demands a specific type (like 'SICK leave'). If a user asks generally about their balance or tickets, retrieve ALL records for that user without extra filters.
         - Write ONLY a valid PostgreSQL SELECT statement.
         - If the task mentions a user by name or username, ALWAYS use a JOIN with the 'users' table and filter by 'full_name' using ILIKE.
-        - If the username contains underscores (e.g., 'ahmed_hassan'), replace the underscores with spaces and use wildcards (e.g., ILIKE '%ahmed hassan%') when filtering 'full_name'.
-        - TRANSLATION MANDATE: If the task description or any entities/names are provided in Arabic, you MUST translate and transliterate them into their English equivalents before using them in the SQL query, as the database only stores English values. For example, convert "أحمد" to "ahmed", "حسن" to "hassan", and map Arabic terms to database enums (e.g., "مرضي" to 'SICK').
+        - When searching for Arabic names, translate the FIRST NAME ONLY to English.
+        - Extract the FIRST 4 LETTERS of that translated first name.
+        - Use ONLY these 4 letters in the ILIKE condition. For example, if the user asks for "نورحان فوزي" or "نورهان", extract "Nourhan", take "nour", and write: `users.full_name ILIKE '%nour%'`. Do not include the last name in the SQL query to avoid spelling mismatches.
+        - Always use `ILIKE` with `%` wildcards on both sides.
         - CRITICAL: You MUST ALWAYS include both the 'id' (from the users table) and the 'full_name' column in your SELECT statement. This ensures the system can verify the user AND passes the exact user ID to subsequent tasks in the execution history.
         - CRITICAL CONDITIONAL LOGIC: If the Task Description contains a condition (e.g., "If the ticket is 'RESOLVED'...") AND you see from the Previous Execution History that this condition is FALSE, you MUST NOT generate a valid SQL query. Instead, output EXACTLY the phrase: "CONDITION_NOT_MET".
         """),
@@ -92,7 +96,8 @@ async def structured_data_node(state: AgentState) -> dict:
         else:
             redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
             redis_client = AsyncRedis.from_url(redis_url)
-            cache_key = f"sql_cache_v1.3:{sql_query}"
+            # Updated cache key version to flush old poorly translated queries
+            cache_key = f"sql_cache_v1.4:{sql_query}"
             
             cached_result = await redis_client.get(cache_key)
             

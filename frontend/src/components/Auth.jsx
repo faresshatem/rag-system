@@ -89,8 +89,8 @@ const Auth = ({ onLogin }) => {
   const [loading, setLoading] = useState(false);
 
   const domainOptions = [
-    { value: 'IT', label: 'IT Department' },
-    { value: 'HR', label: 'HR Department' },
+    { value: 'IT', label: 'IT Access Domain' },
+    { value: 'HR', label: 'HR Access Domain' },
     { value: 'Admin', label: 'Administrator (All Access)' }
   ];
 
@@ -220,12 +220,12 @@ const Auth = ({ onLogin }) => {
                 style={{ overflow: 'visible' }}
               >
                 <div className="input-group" style={{ paddingTop: '4px' }}>
-                  <label>Department Role</label>
+                  <label>Access Domain</label>
                   <Dropdown 
                     options={domainOptions} 
                     value={formData.allowed_domains} 
                     onChange={(val) => setFormData({ ...formData, allowed_domains: val })} 
-                    placeholder="Select a department"
+                    placeholder="Select an access domain"
                   />
                 </div>
               </motion.div>

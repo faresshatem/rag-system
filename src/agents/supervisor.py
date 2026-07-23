@@ -73,13 +73,21 @@ def supervisor_node(state: AgentState) -> dict:
     # 6. Strict RBAC (Role-Based Access Control) Check 
     target_domain = next_task.target_domain
     if target_domain and target_domain not in state.allowed_domains:
-        print(f"Supervisor: Access Denied for domain {target_domain}. Skipping task [{next_task.task_id}].")
+        print(f"Supervisor: Access Denied for domain {target_domain}. Skipping task [{next_task.task_id}] and its dependents.")
         
         updated_tasks = list(state.tasks)
+        # أ. تحويل حالة المهمة المرفوضة إلى فشل بدلاً من اكتساب
         for t in updated_tasks:
             if t.task_id == next_task.task_id:
-                t.status = "completed"
+                t.status = "failed"
                 t.result_summary = f"ACCESS DENIED: User does not have permission to access the {target_domain} domain."
+        
+        # ب. تأثير الدومينو: تخطي المهام المعتمدة فوراً
+        for t in updated_tasks:
+            if t.status == "pending" and getattr(t, "is_dependent", False):
+                print(f"Supervisor: Skipping dependent Task [{t.task_id}] due to RBAC failure.")
+                t.status = "skipped"
+                t.result_summary = "Skipped due to dependency failure (Access Denied on parent task)."
         
         return {
             "tasks": updated_tasks,
