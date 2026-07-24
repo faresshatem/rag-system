@@ -117,18 +117,33 @@ const Dashboard = ({ username, role, onLogout }) => {
 
       {/* Main Content */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-        <AnimatePresence mode="wait">
+        <div style={{ height: '100%', width: '100%' }}>
           <motion.div
-            key={activeTab}
             initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3 }}
-            style={{ height: '100%', width: '100%' }}
+            animate={{ opacity: activeTab === 'chat' ? 1 : 0, y: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{
+              height: '100%',
+              width: '100%',
+              display: activeTab === 'chat' ? 'block' : 'none'
+            }}
           >
-            {activeTab === 'chat' ? <Chat /> : <Ingest />}
+            <Chat />
           </motion.div>
-        </AnimatePresence>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: activeTab === 'ingest' ? 1 : 0, y: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{
+              height: '100%',
+              width: '100%',
+              display: activeTab === 'ingest' ? 'block' : 'none'
+            }}
+          >
+            <Ingest />
+          </motion.div>
+        </div>
       </div>
       {/* Welcome Toast */}
       <AnimatePresence>

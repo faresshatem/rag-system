@@ -17,16 +17,8 @@ function App() {
   const [role, setRole] = useState('');
 
   useEffect(() => {
-    const token = localStorage.getItem('access_token');
-    const storedUsername = localStorage.getItem('username');
-    if (token) {
-      const decoded = decodeToken(token);
-      if (decoded && decoded.role) {
-        setRole(decoded.role);
-      }
-      setIsAuthenticated(true);
-      if (storedUsername) setUsername(storedUsername);
-    }
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('username');
   }, []);
 
   const handleLogin = (user, tokenStr) => {

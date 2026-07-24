@@ -70,14 +70,44 @@ def mock_verification_node(state: AgentState):
     }
 
 def mock_synthesis_node(state: AgentState):
-    print("\n[Mock Synthesis] Generating final text based on everything...")
-    finished_tasks = [t for t in state.tasks if t.status in ('completed', 'failed', 'skipped')]
+    print("\n[Synthesis Agent] Generating final intelligent response...")
+    llm = get_routed_llm(state)
     
-    if finished_tasks:
-        summaries = [str(t.result_summary) for t in finished_tasks if t.result_summary]
-        final_answer = "Based on the retrieved policies and database lookups:\n" + "\n\n".join(summaries)
-    else:
-        final_answer = "I couldn't find any specific answers for your query, but how can I help you generally?"
+    finished_tasks = [t for t in state.tasks if t.status in ('completed', 'failed', 'skipped')]
+    task_results = "\n\n".join([str(t.result_summary) for t in finished_tasks if t.result_summary])
+   
+    chat_history = "\n".join([f"{m.role}: {m.content}" for m in state.messages[-4:]]) if state.messages else ""
+    
+    user_query = state.messages[-1].content if state.messages else ""
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are the final Synthesis Agent for an Enterprise RAG system (HR & IT).
+        Your job is to provide a polite, professional, and highly accurate response in the SAME LANGUAGE as the user.
+        
+        AVAILABLE DATA FROM DATABASES/POLICIES:
+        {task_results}
+        
+        RECENT CHAT HISTORY:
+        {chat_history}
+        
+        RULES:
+        1. If the user's query requires internal data, use ONLY the 'AVAILABLE DATA' to formulate your answer.
+        2. META-QUESTIONS: If the user asks about the conversation itself (e.g., "What did I just ask?", "انا سألتك ايه؟"), use the 'RECENT CHAT HISTORY' to answer them directly.
+        3. FALLBACK: If there is no data retrieved and it's not a meta-question, politely state that you couldn't find the requested information in the company's systems. Do not invent answers.
+        """),
+        ("user", "{query}")
+    ])
+    
+    try:
+        res = (prompt | llm).invoke({
+            "task_results": task_results if task_results else "No database records retrieved.",
+            "chat_history": chat_history,
+            "query": user_query
+        })
+        final_answer = res.content
+    except Exception as e:
+        print(f"[Synthesis Agent] Error: {e}")
+        final_answer = "An error occurred while generating the final response."
         
     return {
         "next_agent": "END",
@@ -85,18 +115,31 @@ def mock_synthesis_node(state: AgentState):
     }
 
 def casual_chat_node(state: AgentState):
-    print("\n[Casual Chat] Handling conversational query without saving to history/summary...")
+    intent = getattr(state, 'query_intent', 'casual_chat')
+    print(f"\n[Guardrail] Handling query with intent: {intent} without saving to history...")
+    
     llm = get_routed_llm(state)
-    user_query = state.messages[0].content if state.messages else ""
+    
+    user_query = state.messages[-1].content if state.messages else ""
     
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a helpful and polite AI assistant. Respond conversationally to the user's greeting or general question. Do not attempt to search internal databases."),
+        ("system", """You are a polite and professional AI assistant for a company's internal RAG system (HR & IT domains).
+        The user's query intent has been classified as: '{intent}'.
+        
+        RULES:
+        - If intent is 'out_of_scope': Politely but firmly decline to answer the question. Clarify that your expertise is strictly limited to internal company matters, HR leave balances, IT tickets, and company policies. Do not answer the external question under any circumstances.
+        - If intent is 'casual_chat': Respond conversationally and politely to the user's greeting or small talk. Ask how you can help them with HR or IT tasks.
+        - Always respond in the same language the user used.
+        - Do not attempt to search internal databases or provide factual data. Keep your response concise.
+        """),
         ("user", "{query}")
     ])
     
-    res = (prompt | llm).invoke({"query": user_query})
+    res = (prompt | llm).invoke({
+        "query": user_query,
+        "intent": intent
+    })
     
-    # Return answer but explicitly DO NOT append to messages (history) or tasks (summary)
     return {
         "answer": res.content,
         "next_agent": "END"
@@ -131,11 +174,20 @@ async def build_graph():
     
     # 5. Fixed & Conditional Edges 
     def planner_router(state: AgentState):
-        if state.query_intent == "casual_chat":
-            return "Casual_Chat_Agent"
+        if state.next_agent in ["Casual_Chat_Agent", "Synthesis_Agent", "Supervisor"]:
+            return state.next_agent
         return "Supervisor"
 
-    workflow.add_conditional_edges("Query-Planning_Agent", planner_router)
+    workflow.add_conditional_edges(
+        "Query-Planning_Agent", 
+        planner_router,
+        {
+            "Casual_Chat_Agent": "Casual_Chat_Agent",
+            "Synthesis_Agent": "Synthesis_Agent",
+            "Supervisor": "Supervisor"
+        }
+    )
+    
     workflow.add_edge("Structured_Data_Agent", "Verification_Agent")
     workflow.add_edge("Retrieval_Agent", "Verification_Agent")
     workflow.add_edge("Verification_Agent", "Supervisor")
