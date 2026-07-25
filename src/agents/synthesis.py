@@ -68,8 +68,39 @@ class SynthesisAgent:
     def _dedupe_by_source(self, chunks: List[RetrievedChunk]) -> Dict[str, RetrievedChunk]:
         return {chunk.chunk_id: chunk for chunk in chunks}
 
+    def _casual_chat_answer(self, state: AgentState) -> dict:
+        """
+        Pure conversational / general-knowledge queries (greetings, small talk,
+        or anything the Planning Agent classified as 'casual_chat') carry no
+        tasks and no retrieved_context by design. Answer directly with the LLM
+        instead of falling into the "no verified context" RAG-refusal path,
+        since there was never supposed to be domain context for these.
+        """
+        user_query = state.messages[-1].content if state.messages else ""
+        try:
+            llm = get_routed_llm(state)
+            prompt = ChatPromptTemplate.from_messages([
+                (
+                    "system",
+                    "You are a helpful, polite AI assistant for an Enterprise RAG system. "
+                    "The user's message is casual conversation or a general-knowledge question "
+                    "unrelated to the company's internal HR/IT data. Respond naturally and helpfully. "
+                    "Do not claim to have searched, or refuse to answer, or mention internal documents "
+                    "or databases for this kind of message.",
+                ),
+                ("user", "{query}"),
+            ])
+            response = (prompt | llm).invoke({"query": user_query})
+            return {"next_agent": "END", "answer": response.content, "citations": None}
+        except Exception as e:
+            logger.error("Casual-chat synthesis failed: %s", str(e))
+            return {"next_agent": "END", "answer": "Hi! How can I help you today?", "citations": None}
+
     def synthesize(self, state: AgentState) -> dict:
         logger.info("Starting synthesis process.")
+
+        if state.query_intent == "casual_chat":
+            return self._casual_chat_answer(state)
 
         verified_chunks = self._verified_chunks(state)
         blocked_notes = self._read_task_notes(state)
