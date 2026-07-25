@@ -90,7 +90,7 @@ def query_planning_node(state: AgentState) -> dict:
         updates = {"query_intent": intent}
         
         if intent in ["casual_chat", "out_of_scope"]:
-            updates["next_agent"] = "Casual_Chat_Agent"
+            updates["next_agent"] = "Synthesis_Agent"
             updates["current_task_id"] = None
         elif intent == "ready_for_synthesis" or not response.plan:
             updates["next_agent"] = "Synthesis_Agent"

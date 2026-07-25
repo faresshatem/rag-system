@@ -11,97 +11,9 @@ from src.agents.structured import structured_data_node
 from src.agents.retrieval import retrieval_node
 from src.agents.verification import verification_node
 from src.agents.synthesis import synthesis_node
-from src.generation.router import get_routed_llm
-from langchain_core.prompts import ChatPromptTemplate
 from src.agents.memory import memory_summarization_node
-import uuid
 
 load_dotenv(find_dotenv())
-
-def mock_retrieval_node(state: AgentState):
-    print("\n[Mock Retrieval] Simulating vector search...")
-    updated_tasks = list(state.tasks)
-    
-    for t in updated_tasks:
-        if t.task_id == state.current_task_id:
-            t.status = "completed"
-            
-            if t.target_domain == 'HR':
-                t.result_summary = "HR Policy found: Employees can take up to 14 consecutive days of ANNUAL leave with direct manager approval."
-            elif t.target_domain == 'IT':
-                t.result_summary = "IT Policy found: RESOLVED tickets will be permanently closed after 48 hours of inactivity."
-            else:
-                t.result_summary = "Policy found: Standard company guidelines apply."
-                
-    return {
-        "tasks": updated_tasks,
-        "current_task_id": None, 
-        "next_agent": "Verification_Agent"
-    }
-def mock_verification_node(state: AgentState):
-    print("\n[Mock Verification] Checking retrieved data...")
-    
-    updated_tasks = list(state.tasks)
-    
-    active_task = next((t for t in updated_tasks if t.task_id == state.current_task_id), None)
-    
-    if active_task and active_task.status == 'completed':
-        
-        if "No records found" in str(active_task.result_summary):
-            print("   -> [Verification Failed] Database returned empty. Sending feedback.")
-            return {
-                "tasks": updated_tasks,
-                "is_context_valid": False, 
-                "next_agent": "Supervisor"
-            }
-            
-        if "Mocked context" in str(active_task.result_summary):
-            print("   -> [Verification Failed] Useless vector data found. Sending feedback.")
-            return {
-                "tasks": updated_tasks,
-                "is_context_valid": False, 
-                "next_agent": "Supervisor"
-            }
-            
-    print("   -> [Verification Passed] Data looks good. Approving.")
-    return {
-        "is_context_valid": True, 
-        "next_agent": "Supervisor"
-    }
-
-def mock_synthesis_node(state: AgentState):
-    print("\n[Mock Synthesis] Generating final text based on everything...")
-    finished_tasks = [t for t in state.tasks if t.status in ('completed', 'failed', 'skipped')]
-    
-    if finished_tasks:
-        summaries = [str(t.result_summary) for t in finished_tasks if t.result_summary]
-        final_answer = "Based on the retrieved policies and database lookups:\n" + "\n\n".join(summaries)
-    else:
-        final_answer = "I couldn't find any specific answers for your query, but how can I help you generally?"
-        
-    return {
-        "next_agent": "END",
-        "answer": final_answer
-    }
-
-def casual_chat_node(state: AgentState):
-    print("\n[Casual Chat] Handling conversational query without saving to history/summary...")
-    llm = get_routed_llm(state)
-    user_query = state.messages[0].content if state.messages else ""
-    
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a helpful and polite AI assistant. Respond conversationally to the user's greeting or general question. Do not attempt to search internal databases."),
-        ("user", "{query}")
-    ])
-    
-    res = (prompt | llm).invoke({"query": user_query})
-    
-    # Return answer but explicitly DO NOT append to messages (history) or tasks (summary)
-    return {
-        "answer": res.content,
-        "next_agent": "END"
-    }
-
 
 async def build_graph():
     workflow = StateGraph(AgentState)
@@ -112,15 +24,9 @@ async def build_graph():
     workflow.add_node("Query-Planning_Agent", query_planning_node)
     workflow.add_node("Structured_Data_Agent", structured_data_node)
 
-    # 2. Retrieval / Verification / Synthesis now use the real, production
-    #    implementations (hybrid dense+sparse+RRF retrieval, LLM-based
-    #    grading, and LLM-based cited synthesis) instead of the mock nodes.
-    #    The mock_* functions above are left in place, unused, in case they
-    #    are still needed for local demos/tests.
     workflow.add_node("Retrieval_Agent", retrieval_node)
     workflow.add_node("Verification_Agent", verification_node)
     workflow.add_node("Synthesis_Agent", synthesis_node)
-    workflow.add_node("Casual_Chat_Agent", casual_chat_node)
 
     workflow.add_edge(START, "Memory_Agent")
     workflow.add_edge("Memory_Agent", "Supervisor")
@@ -135,8 +41,8 @@ async def build_graph():
     
     # 5. Fixed & Conditional Edges 
     def planner_router(state: AgentState):
-        if state.query_intent == "casual_chat":
-            return "Casual_Chat_Agent"
+        if state.query_intent in ["casual_chat", "out_of_scope", "ready_for_synthesis"]:
+            return "Synthesis_Agent"
         return "Supervisor"
 
     workflow.add_conditional_edges("Query-Planning_Agent", planner_router)
@@ -144,7 +50,6 @@ async def build_graph():
     workflow.add_edge("Retrieval_Agent", "Verification_Agent")
     workflow.add_edge("Verification_Agent", "Supervisor")
     workflow.add_edge("Synthesis_Agent", END)
-    workflow.add_edge("Casual_Chat_Agent", END)
     
     # 6. Memory Setup
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")

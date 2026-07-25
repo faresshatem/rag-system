@@ -24,7 +24,7 @@ def supervisor_node(state: AgentState) -> dict:
         return {"next_agent": "Synthesis_Agent", "step_count": current_step + 1}
         
     # 3. Check for Final Intent from Planner
-    if state.query_intent in ["casual_chat", "ready_for_synthesis"]:
+    if state.query_intent in ["casual_chat", "out_of_scope", "ready_for_synthesis"]:
         print(f"Supervisor: Intent is {state.query_intent}. Routing to Synthesis.")
         return {"next_agent": "Synthesis_Agent", "step_count": current_step + 1}
         
