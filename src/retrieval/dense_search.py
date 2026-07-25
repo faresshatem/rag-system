@@ -120,12 +120,12 @@ class DenseSearch:
             search_filter = self._build_filter(domain, metadata)
             top_k = top_k or self.top_k
 
-            results = self.qdrant_client.search(
+            results = self.qdrant_client.query_points(
                 collection_name=self.collection_name,
-                query_vector=query_vector,
+                query=query_vector,
                 query_filter=search_filter,
-                limit=top_k
-            )
+                limit=top_k,
+            ).points
 
             logger.info("Search completed successfully with %d results.", len(results))
             return [
