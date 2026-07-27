@@ -4,6 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from src.api.routes import router as api_router
 from src.agents.graph import build_graph
+from prometheus_client import start_http_server
+
+
+start_http_server(8001)
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):

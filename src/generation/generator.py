@@ -23,5 +23,9 @@ def get_llm(use_local: bool = False, temperature: float = 0.0):
             temperature=temperature,
         )
 
-api_llm = get_llm(use_local=False)  
-local_llm = get_llm(use_local=True) 
+try:
+    api_llm = get_llm(use_local=False)
+except Exception:
+    api_llm = get_llm(use_local=True)
+
+local_llm = get_llm(use_local=True)
