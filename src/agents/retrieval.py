@@ -177,6 +177,5 @@ def retrieval_node(state: AgentState) -> dict:
     return {
         "tasks": updated_tasks,
         "retrieved_context": updated_context,
-        "current_task_id": None,
         "next_agent": "Verification_Agent",
     }

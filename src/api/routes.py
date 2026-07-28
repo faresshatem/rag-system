@@ -3,7 +3,11 @@ from fastapi.security import OAuth2PasswordRequestForm
 import tempfile
 import os
 import shutil
+import uuid
 from src.ingestion.doc_loader import DocumentLoader
+from src.ingestion.chunker import DocumentChunker
+from src.ingestion.embedding import EmbeddingGenerator
+from src.ingestion.db_connector import QdrantConnector
 from sqlalchemy.orm import Session
 from .schemas import QueryRequest, QueryResponse, UserCreate, UserResponse, TokenResponse, IngestRequest
 from .database import get_db, User
@@ -102,6 +106,8 @@ def ingest_data(
     Task 4 boundary applied to data uploading/ingestion.
     Ensures an HR employee cannot upload documents into the IT namespace.
     Restricts data ingestion strictly to Admin users.
+
+    Pipeline: load -> chunk -> embed -> upload to Qdrant -> verify.
     """
     role = user_context.get("role")
     if role != "Admin":
@@ -116,26 +122,62 @@ def ingest_data(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Write Access Denied: Target namespace {domain} is not in your allowed domains."
         )
-        
-    # Save uploaded file temporarily
+
+    # 1. Save uploaded file temporarily
     try:
         suffix = os.path.splitext(file.filename)[1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             shutil.copyfileobj(file.file, temp_file)
             temp_file_path = temp_file.name
 
-        # Parse the document using doc_loader
+        # 2. Load document
         docs = DocumentLoader.load(temp_file_path)
-        
-        # Clean up temp file
         os.remove(temp_file_path)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process uploaded file: {str(e)}"
+            detail=f"Failed to load file: {str(e)}"
         )
-        
+
+    if not docs:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No content extracted from {file.filename}."
+        )
+
+    # 3. Chunk documents
+    document_id = str(uuid.uuid4())
+    chunker = DocumentChunker()
+    chunks = chunker.chunk(
+        docs,
+        document_id=document_id,
+        domain=domain,
+        file_name=file.filename,
+    )
+
+    # 4. Map metadata for retrieval layer compatibility
+    for chunk in chunks:
+        chunk.metadata["document_name"] = chunk.metadata.pop("file_name", file.filename)
+        chunk.metadata["source"] = "ingestion_api"
+        chunk.metadata["document_type"] = os.path.splitext(file.filename)[1].lower()
+
+    # 5. Generate embeddings
+    embedder = EmbeddingGenerator()
+    vectors = embedder.embed_documents(chunks)
+
+    # 6. Upload to Qdrant
+    connector = QdrantConnector()
+    if not connector.collection_exists():
+        connector.create_collection(vector_size=len(vectors[0]))
+    connector.upload_documents(vectors, chunks)
+
+    # 7. Verify upload by checking points_count
+    collection_info = connector.client.get_collection(connector.collection_name)
+    points_count = collection_info.points_count
+
     return {
-        "status": "success", 
-        "message": f"Successfully loaded and parsed {len(docs)} document chunk(s) from {file.filename} into namespace: {domain}"
+        "status": "success",
+        "message": f"Ingested {file.filename} into namespace: {domain}",
+        "chunks_uploaded": len(chunks),
+        "qdrant_points_count": points_count,
     }

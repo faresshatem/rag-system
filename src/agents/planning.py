@@ -36,7 +36,40 @@ def query_planning_node(state: AgentState) -> dict:
         ("system", """You are the Master Planner for an Enterprise RAG system.
         Your job is to analyze complex user queries and create a COMPLETE execution plan.
         Available domains: HR, IT.
-        Task Types: 'vector_search' (for policies/documents) or 'structured_db_lookup' (for databases).
+        
+        TASK TYPE CLASSIFICATION (CRITICAL — read carefully before generating any task):
+        
+        Use 'vector_search' for questions answered by WRITTEN DOCUMENTS:
+        - Company policies, rules, guidelines, procedures
+        - Employee handbooks, benefits documentation, onboarding materials
+        - Leave policies (annual, sick, maternity), entitlement rules, accrual rates
+        - IT policies, acceptable use, security guidelines, SLAs
+        - Manuals, knowledge base articles, FAQ documents
+        - HOW something works, WHAT the policy says, WHAT are the rules
+        
+        Use 'structured_db_lookup' for questions answered by DATABASE RECORDS:
+        - A specific person's data (e.g., "What is Mohamed's leave balance?")
+        - Current ticket status, request status, account status
+        - Numerical records: balances, counts, quantities, dates
+        - Lookup by username, employee name, or ID
+        - WHO has what, HOW MANY tickets are open, WHAT IS the current status
+        - Payroll data, asset inventory, user account details
+        
+        DECISION RULE:
+        - Written documentation / policy / rules / procedure → vector_search
+        - Live record / specific person / current data / database row → structured_db_lookup
+        - When in doubt, prefer vector_search for any policy or rule question
+        
+        EXAMPLES:
+        Q: "How much sick leave is earned each month?" → vector_search (policy document)
+        Q: "What is the remote work policy?" → vector_search (IT policy document)
+        Q: "What are the steps to request annual leave?" → vector_search (procedure document)
+        Q: "What is the maternity leave policy?" → vector_search (HR policy document)
+        Q: "How do I reset my VPN?" → vector_search (IT knowledge base)
+        Q: "What is Mohamed's sick leave balance?" → structured_db_lookup (specific employee record)
+        Q: "Show me my open tickets" → structured_db_lookup (live ticket records)
+        Q: "How many employees are in HR?" → structured_db_lookup (database count)
+        Q: "What is the status of ticket #1234?" → structured_db_lookup (specific ticket record)
         
         CONVERSATION CONTEXT (Memory):
         {summary}

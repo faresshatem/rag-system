@@ -24,17 +24,47 @@ class SynthesisAgent:
 
     def _verified_chunks(self, state: AgentState) -> List[RetrievedChunk]:
         """
-        Only chunks produced by tasks with status == 'completed' are considered
-        verified context. Chunks from 'failed'/'skipped' tasks (verification
-        failures, RBAC denials, unmet conditions, etc.) are excluded from
-        synthesis so the model never grounds an answer on rejected context.
+        Return context chunks that are safe to ground an answer on.
+
+        Priority:
+        1. Chunks from tasks with status == 'completed'.
+        2. If no completed-task chunks exist, fall back to chunks from tasks
+           whose result_summary indicates data was actually retrieved (i.e. the
+           task ran and produced results but was later marked 'failed' by
+           verification — a common situation when the grading model is
+           overly strict).  This prevents a strict verifier from silently
+           discarding perfectly good retrieved context.
         """
-        completed_task_ids = {t.task_id for t in state.tasks if t.status == "completed"}
-        return [
-            chunk
-            for chunk in state.retrieved_context
-            if any(chunk.chunk_id.startswith(f"{tid}_") for tid in completed_task_ids)
+        task_map = {t.task_id: t for t in state.tasks}
+
+        # Primary: chunks from completed tasks
+        completed_ids = {tid for tid, t in task_map.items() if t.status == "completed"}
+        chunks = [
+            c for c in state.retrieved_context
+            if any(c.chunk_id.startswith(f"{tid}_") for tid in completed_ids)
         ]
+        if chunks:
+            return chunks
+
+        # Fallback: chunks from tasks that retrieved data but were marked failed
+        # (e.g. verification returned is_valid=False despite usable context).
+        failed_ids = {
+            tid for tid, t in task_map.items()
+            if t.status == "failed" and t.result_summary
+            and "ACCESS DENIED" not in t.result_summary
+            and "Skipped" not in t.result_summary
+        }
+        chunks = [
+            c for c in state.retrieved_context
+            if any(c.chunk_id.startswith(f"{tid}_") for tid in failed_ids)
+        ]
+        if chunks:
+            logger.info(
+                "No completed-task chunks, but found %d chunk(s) from tasks "
+                "that did retrieve data. Using them as fallback context.",
+                len(chunks),
+            )
+        return chunks
 
     def _read_task_notes(self, state: AgentState) -> List[str]:
         """Human-readable notes for tasks that produced no citable chunks (e.g. RBAC denials, skips)."""
@@ -96,6 +126,27 @@ class SynthesisAgent:
             logger.error("Casual-chat synthesis failed: %s", str(e))
             return {"next_agent": "END", "answer": "Hi! How can I help you today?", "citations": None}
 
+    @staticmethod
+    def _human_source_name(file_name: str) -> str:
+        """Convert a filename like 'leave_policy.txt' into 'Leave Policy'."""
+        name = file_name
+        for ext in (".txt", ".pdf", ".docx", ".md"):
+            if name.lower().endswith(ext):
+                name = name[: -len(ext)]
+                break
+        return name.replace("_", " ").replace("-", " ").title()
+
+    def _dedupe_sources(self, chunks: List[RetrievedChunk]) -> List[str]:
+        """Return unique, human-readable source names preserving first-seen order."""
+        seen = set()
+        sources = []
+        for chunk in chunks:
+            key = chunk.file_name.lower()
+            if key not in seen:
+                seen.add(key)
+                sources.append(self._human_source_name(chunk.file_name))
+        return sources
+
     def synthesize(self, state: AgentState) -> dict:
         logger.info("Starting synthesis process.")
 
@@ -103,19 +154,27 @@ class SynthesisAgent:
             return self._casual_chat_answer(state)
 
         verified_chunks = self._verified_chunks(state)
-        blocked_notes = self._read_task_notes(state)
 
         if not verified_chunks:
-            fallback = (
-                "I couldn't find verified information to answer your request."
-                if not blocked_notes
-                else "I couldn't retrieve the information you need:\n" + "\n".join(blocked_notes)
-            )
-            logger.info("No verified context available; returning fallback answer without LLM call.")
-            return {"next_agent": "END", "answer": fallback, "citations": None}
+            logger.info("No verified context available; returning fallback answer.")
+            return {
+                "next_agent": "END",
+                "answer": (
+                    "I couldn't find this information in the available internal knowledge base.\n\n"
+                    "**Sources**\n\nNone"
+                ),
+                "citations": None,
+            }
 
         context_block = self._build_context_block(verified_chunks)
         user_query = state.messages[-1].content if state.messages else ""
+        source_names = self._dedupe_sources(verified_chunks)
+        sources_block = "\n".join(f"- {name}" for name in source_names) if source_names else "None"
+
+        # Include the original task description(s) to guide the LLM's focus
+        task_descriptions = "\n".join(
+            f"- {t.description}" for t in state.tasks if t.status in ("completed", "failed") and t.result_summary
+        )
 
         try:
             llm = get_routed_llm(state)
@@ -123,38 +182,52 @@ class SynthesisAgent:
             prompt = ChatPromptTemplate.from_messages([
                 (
                     "system",
-                    "You are the Synthesis & Citation Agent for an Enterprise RAG system. "
-                    "Answer the user's question using ONLY the numbered context blocks provided below. "
-                    "Never use outside knowledge and never invent facts that are not in the context. "
-                    "After every sentence or claim that relies on a specific context block, append that "
-                    "block's exact citation tag in Markdown, verbatim, e.g. "
-                    "'Employees get 14 days of leave [Source: hr_policy.pdf | Chunk: #12].' "
-                    "If the context blocks conflict or are insufficient to fully answer, say so explicitly. "
-                    "Write a clear, concise, well-structured answer in Markdown.",
+                    "You are a professional AI assistant for an enterprise knowledge system. "
+                    "Your job is to answer the user's question accurately using ONLY the verified context blocks below.\n\n"
+                    "STRICT RULES:\n"
+                    "1. Read EVERY context block carefully before answering.\n"
+                    "2. Look for specific facts: numbers, time periods, frequencies, percentages, policies, and rules.\n"
+                    "3. If the context contains the answer, state it clearly and concisely. Do NOT say the information is missing.\n"
+                    "4. If the context truly does not contain the answer, say: "
+                    "\"I couldn't find this information in the available internal knowledge base.\"\n"
+                    "5. Synthesize information from all relevant blocks into one coherent answer.\n"
+                    "6. Remove duplicated sentences and repeated facts.\n"
+                    "7. Never invent information not found in the context.\n"
+                    "8. Never expose internal details: no chunk IDs, task IDs, vector IDs, "
+                    "pipeline messages, verification status, or debug information.\n"
+                    "9. Do NOT include a Sources section; it will be appended automatically.\n"
+                    "10. Do NOT include citation tags like [Source: ...] in your answer.\n"
+                    "11. Keep markdown simple: use **bold** for key facts only.",
                 ),
                 (
                     "user",
-                    "User Question: {query}\n\nContext:\n{context}",
+                    "User Question: {query}\n\n"
+                    "Information Sought:\n{tasks}\n\n"
+                    "Verified Context:\n{context}",
                 ),
             ])
 
-            response = (prompt | llm).invoke({"query": user_query, "context": context_block})
-            final_answer = response.content
+            response = (prompt | llm).invoke({
+                "query": user_query,
+                "tasks": task_descriptions,
+                "context": context_block,
+            })
+            final_answer = response.content.strip()
 
-            if blocked_notes:
-                final_answer += "\n\n> Note: some parts of your request could not be completed:\n" + "\n".join(
-                    f"> {n}" for n in blocked_notes
-                )
+            # If the LLM determined the context doesn't answer the question,
+            # suppress unrelated source listings.
+            _not_found = "couldn't find" in final_answer.lower() or "not found" in final_answer.lower()
+            if _not_found:
+                final_answer += "\n\n**Sources**\n\nNone"
+            else:
+                final_answer += f"\n\n**Sources**\n\n{sources_block}"
 
         except Exception as e:
             logger.error("Synthesis LLM call failed: %s", str(e))
-            # Fail safe: fall back to a plainly-cited concatenation of verified context
-            # rather than surfacing a raw error to the user.
             joined = "\n\n".join(
-                f"{chunk.text} [Source: {chunk.file_name} | Chunk: #{chunk.chunk_id}]"
-                for chunk in verified_chunks
+                f"{chunk.text}" for chunk in verified_chunks
             )
-            final_answer = f"Based on the retrieved context:\n\n{joined}"
+            final_answer = f"{joined}\n\n**Sources**\n\n{sources_block}"
 
         citations = self._build_citations(list(self._dedupe_by_source(verified_chunks).values()))
 

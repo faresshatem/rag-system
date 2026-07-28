@@ -155,7 +155,7 @@ async def structured_data_node(state: AgentState) -> dict:
         summary = "Failed to execute database lookup."
 
     chunk = RetrievedChunk(
-        chunk_id=f"db_{active_task.task_id}",
+        chunk_id=f"{active_task.task_id}_db_result",
         file_name=f"{target_domain}_SQL_Database",
         text=result_text,
         page=None
