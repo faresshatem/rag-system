@@ -132,7 +132,7 @@ class ReciprocalRankFusion:
                 continue
 
             # Ensure payload contains required fields for citation support
-            if not all(key in payload for key in ["chunk_id", "document_name", "text", "metadata"]):
+            if not all(key in payload for key in ["chunk_id", "document_name", "text"]):
                 logger.warning("Result ID '%s' has an incomplete payload. Skipping.", result_id)
                 continue
 
@@ -148,13 +148,13 @@ class ReciprocalRankFusion:
 if __name__ == "__main__":
     # Example dense and sparse results
     dense_results = [
-        SearchResult(id="1", score=0.9, payload={"chunk_id": "c1", "document_name": "doc1", "text": "Dense text 1", "domain": "HR", "metadata": {}}),
-        SearchResult(id="2", score=0.8, payload={"chunk_id": "c2", "document_name": "doc2", "text": "Dense text 2", "domain": "IT", "metadata": {}})
+        SearchResult(id="1", score=0.9, payload={"chunk_id": "c1", "document_name": "doc1", "text": "Dense text 1", "domain": "HR"}),
+        SearchResult(id="2", score=0.8, payload={"chunk_id": "c2", "document_name": "doc2", "text": "Dense text 2", "domain": "IT"})
     ]
 
     sparse_results = [
-        SearchResult(id="2", score=0.85, payload={"chunk_id": "c2", "document_name": "doc2", "text": "Sparse text 2", "domain": "IT", "metadata": {}}),
-        SearchResult(id="3", score=0.7, payload={"chunk_id": "c3", "document_name": "doc3", "text": "Sparse text 3", "domain": "Finance", "metadata": {}})
+        SearchResult(id="2", score=0.85, payload={"chunk_id": "c2", "document_name": "doc2", "text": "Sparse text 2", "domain": "IT"}),
+        SearchResult(id="3", score=0.7, payload={"chunk_id": "c3", "document_name": "doc3", "text": "Sparse text 3", "domain": "Finance"})
     ]
 
     # Perform Reciprocal Rank Fusion

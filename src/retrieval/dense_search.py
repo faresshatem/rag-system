@@ -137,7 +137,7 @@ class DenseSearch:
                         "document_name": result.payload.get("document_name"),
                         "text": result.payload.get("text"),
                         "domain": result.payload.get("domain"),
-                        "metadata": result.payload.get("metadata"),
+                        "page": result.payload.get("page"),
                     },
                 )
                 for result in results

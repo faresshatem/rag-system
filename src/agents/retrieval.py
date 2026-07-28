@@ -76,8 +76,7 @@ class RetrievalAgent:
         chunks = []
         for result in results:
             payload = result.payload or {}
-            metadata = payload.get("metadata") or {}
-            page = metadata.get("page") if isinstance(metadata, dict) else None
+            page = payload.get("page")
 
             chunks.append(
                 RetrievedChunk(

@@ -103,7 +103,7 @@ class SparseSearch:
                             "document_name": document.metadata.get("document_name"),
                             "text": document.text,
                             "domain": document.metadata.get("domain"),
-                            "metadata": document.metadata,
+                            "page": document.metadata.get("page"),
                         },
                     )
                 )
