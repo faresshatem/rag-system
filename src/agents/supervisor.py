@@ -24,7 +24,7 @@ def supervisor_node(state: AgentState) -> dict:
         return {"next_agent": "Synthesis_Agent", "step_count": current_step + 1}
         
     # 3. Check for Final Intent from Planner
-    if state.query_intent in ["casual_chat", "ready_for_synthesis"]:
+    if state.query_intent in ["casual_chat", "out_of_scope", "ready_for_synthesis"]:
         print(f"Supervisor: Intent is {state.query_intent}. Routing to Synthesis.")
         return {"next_agent": "Synthesis_Agent", "step_count": current_step + 1}
         
@@ -73,13 +73,21 @@ def supervisor_node(state: AgentState) -> dict:
     # 6. Strict RBAC (Role-Based Access Control) Check 
     target_domain = next_task.target_domain
     if target_domain and target_domain not in state.allowed_domains:
-        print(f"Supervisor: Access Denied for domain {target_domain}. Skipping task [{next_task.task_id}].")
+        print(f"Supervisor: Access Denied for domain {target_domain}. Skipping task [{next_task.task_id}] and its dependents.")
         
         updated_tasks = list(state.tasks)
+        # أ. تحويل حالة المهمة المرفوضة إلى فشل بدلاً من اكتساب
         for t in updated_tasks:
             if t.task_id == next_task.task_id:
-                t.status = "completed"
+                t.status = "failed"
                 t.result_summary = f"ACCESS DENIED: User does not have permission to access the {target_domain} domain."
+        
+        # ب. تأثير الدومينو: تخطي المهام المعتمدة فوراً
+        for t in updated_tasks:
+            if t.status == "pending" and getattr(t, "is_dependent", False):
+                print(f"Supervisor: Skipping dependent Task [{t.task_id}] due to RBAC failure.")
+                t.status = "skipped"
+                t.result_summary = "Skipped due to dependency failure (Access Denied on parent task)."
         
         return {
             "tasks": updated_tasks,
@@ -89,7 +97,12 @@ def supervisor_node(state: AgentState) -> dict:
         }
         
     # 7. Dynamic Routing to Specialists based on task_type
-    next_node = "Retrieval_Agent" if next_task.task_type == "vector_search" else "Structured_Data_Agent"
+    TASK_TYPE_ROUTES = {
+        "vector_search": "Retrieval_Agent",
+        "structured_db_lookup": "Structured_Data_Agent",
+        "web_search": "Web_Search_Agent",
+    }
+    next_node = TASK_TYPE_ROUTES.get(next_task.task_type, "Structured_Data_Agent")
     print(f"Supervisor: Routing to {next_node} for Task [{next_task.task_id}] (Domain: {target_domain}).")
     
     return {

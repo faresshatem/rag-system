@@ -108,7 +108,7 @@ const Auth = ({ onLogin }) => {
         localStorage.setItem('access_token', data.access_token);
         onLogin(formData.username);
       } else {
-        const role = formData.allowed_domains === 'Admin' ? 'Admin' : 'User';
+        const role = formData.allowed_domains;
         const domain = formData.allowed_domains === 'Admin' ? '' : formData.allowed_domains;
         await register(formData.username, formData.password, role, domain);
         const data = await login(formData.username, formData.password);
@@ -290,3 +290,4 @@ const Auth = ({ onLogin }) => {
 };
 
 export default Auth;
+

@@ -45,7 +45,29 @@ async def run_query(payload: QueryRequest, request: Request, user_context: dict 
     """
     allowed_domains = user_context.get("domains", [])
     username = user_context.get("username")
-    
+        # Enforce domain access before the LLM/planner can answer.
+    query_text = payload.query.lower()
+
+    hr_keywords = (
+        "hr", "leave", "annual leave", "leave balance",
+        "payroll", "salary", "employee benefits"
+    )
+    it_keywords = (
+        "it ticket", "it tickets", "support ticket",
+        "incident", "server", "system access"
+    )
+
+    if "HR" not in allowed_domains and any(term in query_text for term in hr_keywords):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: You do not have permission to access the HR domain."
+        )
+
+    if "IT" not in allowed_domains and any(term in query_text for term in it_keywords):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: You do not have permission to access the IT domain."
+        )
     if not allowed_domains:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
