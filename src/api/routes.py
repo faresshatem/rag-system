@@ -9,11 +9,22 @@ from src.ingestion.chunker import DocumentChunker
 from src.ingestion.embedding import EmbeddingGenerator
 from src.ingestion.db_connector import QdrantConnector
 from sqlalchemy.orm import Session
-from .schemas import QueryRequest, QueryResponse, UserCreate, UserResponse, TokenResponse, IngestRequest
+from .schemas import QueryRequest, QueryResponse, UserCreate, UserResponse, TokenResponse, IngestRequest, JudgeRequest, JudgeResponse
 from .database import get_db, User
 from .services import AuthService
 from .rbac import get_current_user_context
 from typing import List
+from src.evaluation.judge_llm import judge
+from prometheus_client import Counter, Gauge
+
+# Define Prometheus metrics
+JUDGE_REQUESTS_TOTAL = Counter('judge_requests_total', 'Total number of judge evaluation requests')
+JUDGE_LAST_SCORE = Gauge('judge_last_score', 'Overall quality score of the last evaluation')
+JUDGE_FAITHFULNESS = Gauge('judge_faithfulness', 'Faithfulness score of the last evaluation')
+JUDGE_RELEVANCE = Gauge('judge_relevance', 'Relevance score of the last evaluation')
+JUDGE_COMPLETENESS = Gauge('judge_completeness', 'Completeness score of the last evaluation')
+JUDGE_CITATION_ACCURACY = Gauge('judge_citation_accuracy', 'Citation accuracy score of the last evaluation')
+JUDGE_HALLUCINATION_RISK = Gauge('judge_hallucination_risk', 'Hallucination risk score of the last evaluation')
 
 router = APIRouter()
 
@@ -181,3 +192,38 @@ def ingest_data(
         "chunks_uploaded": len(chunks),
         "qdrant_points_count": points_count,
     }
+
+@router.post("/evaluate", response_model=JudgeResponse)
+def evaluate_answer(payload: JudgeRequest, user_context: dict = Depends(get_current_user_context)):
+    """
+    Evaluates an answer using the LLMJudge. Only accessible by Admins.
+    """
+    role = user_context.get("role")
+    if role != "Admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: Only Administrators can perform evaluations."
+        )
+
+    try:
+        result = judge.evaluate(
+            question=payload.question,
+            answer=payload.answer,
+            golden_answer=payload.golden_answer,
+        )
+        
+        # Update Prometheus metrics
+        JUDGE_REQUESTS_TOTAL.inc()
+        JUDGE_LAST_SCORE.set(result.overall_score * 100)
+        JUDGE_FAITHFULNESS.set(result.faithfulness * 100)
+        JUDGE_RELEVANCE.set(result.relevance * 100)
+        JUDGE_COMPLETENESS.set(result.completeness * 100)
+        JUDGE_CITATION_ACCURACY.set(result.citation_accuracy * 100)
+        JUDGE_HALLUCINATION_RISK.set(result.hallucination_risk * 100)
+        
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Evaluation failed: {str(e)}"
+        )

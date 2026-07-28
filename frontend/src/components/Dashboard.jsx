@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import Chat from './Chat';
 import Ingest from './Ingest';
-import { MessageSquare, Database, LogOut, LayoutDashboard, Check } from 'lucide-react';
+import Judge from './Judge';
+import { MessageSquare, Database, LogOut, LayoutDashboard, Check, Scale, Activity } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Dashboard = ({ username, role, onLogout }) => {
@@ -67,6 +68,7 @@ const Dashboard = ({ username, role, onLogout }) => {
             </motion.button>
             
             {role === 'Admin' && (
+              <>
               <motion.button
                 whileHover={{ x: 5 }}
                 whileTap={{ scale: 0.98 }}
@@ -88,6 +90,51 @@ const Dashboard = ({ username, role, onLogout }) => {
                   <Database size={18} color={activeTab === 'ingest' ? 'var(--cyan)' : 'var(--text-muted)'} /> Data Ingestion
                 </span>
               </motion.button>
+
+              <motion.button
+                whileHover={{ x: 5 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setActiveTab('judge')}
+                style={{
+                  position: 'relative', display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: 'none',
+                  background: 'transparent',
+                  color: activeTab === 'judge' ? 'var(--text-main)' : 'var(--text-muted)',
+                  cursor: 'pointer', transition: 'color 0.2s', textAlign: 'left', width: '100%', fontSize: '0.95rem', fontWeight: activeTab === 'judge' ? 600 : 400
+                }}
+              >
+                {activeTab === 'judge' && (
+                  <motion.div
+                    layoutId="activeTabIndicator"
+                    style={{ position: 'absolute', inset: 0, background: 'rgba(147, 51, 234, 0.15)', border: '1px solid rgba(147, 51, 234, 0.4)', borderRadius: '12px', boxShadow: '0 0 20px rgba(147, 51, 234, 0.2)', zIndex: 0 }}
+                  />
+                )}
+                <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <Scale size={18} color={activeTab === 'judge' ? 'var(--cyan)' : 'var(--text-muted)'} /> LLM Judge
+                </span>
+              </motion.button>
+
+              <motion.button
+                whileHover={{ x: 5 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setActiveTab('metrics')}
+                style={{
+                  position: 'relative', display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: 'none',
+                  background: 'transparent',
+                  color: activeTab === 'metrics' ? 'var(--text-main)' : 'var(--text-muted)',
+                  cursor: 'pointer', transition: 'color 0.2s', textAlign: 'left', width: '100%', fontSize: '0.95rem', fontWeight: activeTab === 'metrics' ? 600 : 400
+                }}
+              >
+                {activeTab === 'metrics' && (
+                  <motion.div
+                    layoutId="activeTabIndicator"
+                    style={{ position: 'absolute', inset: 0, background: 'rgba(147, 51, 234, 0.15)', border: '1px solid rgba(147, 51, 234, 0.4)', borderRadius: '12px', boxShadow: '0 0 20px rgba(147, 51, 234, 0.2)', zIndex: 0 }}
+                  />
+                )}
+                <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <Activity size={18} color={activeTab === 'metrics' ? 'var(--cyan)' : 'var(--text-muted)'} /> Live Metrics
+                </span>
+              </motion.button>
+              </>
             )}
           </div>
         </div>
@@ -142,6 +189,55 @@ const Dashboard = ({ username, role, onLogout }) => {
             }}
           >
             <Ingest />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: activeTab === 'judge' ? 1 : 0, y: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{
+              height: '100%',
+              width: '100%',
+              display: activeTab === 'judge' ? 'block' : 'none'
+            }}
+          >
+            <Judge />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: activeTab === 'metrics' ? 1 : 0, y: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{
+              height: '100%',
+              width: '100%',
+              display: activeTab === 'metrics' ? 'block' : 'none'
+            }}
+          >
+            <div style={{ height: '100%', padding: '30px', overflowY: 'auto' }}>
+              <div style={{ maxWidth: '1200px', margin: '0 auto', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
+                  <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'linear-gradient(135deg, var(--accent), var(--cyan))', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 20px rgba(6, 182, 212, 0.3)' }}>
+                    <Activity size={24} color="white" />
+                  </div>
+                  <div>
+                    <h1 style={{ fontSize: '1.8rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>Live Metrics</h1>
+                    <p style={{ color: 'var(--text-muted)', margin: '4px 0 0 0' }}>Real-time Grafana dashboard of RAG evaluations</p>
+                  </div>
+                </div>
+                
+                <div style={{ flex: 1, background: 'var(--bg-panel)', borderRadius: '16px', border: '1px solid var(--border)', overflow: 'hidden', minHeight: '600px' }}>
+                  <iframe 
+                    src="http://localhost:3005/d/llm_judge_01/llm-judge-evaluation-dashboard?orgId=1&kiosk" 
+                    width="100%" 
+                    height="100%" 
+                    frameBorder="0"
+                    title="Grafana Metrics"
+                    style={{ display: 'block', minHeight: '600px' }}
+                  ></iframe>
+                </div>
+              </div>
+            </div>
           </motion.div>
         </div>
       </div>

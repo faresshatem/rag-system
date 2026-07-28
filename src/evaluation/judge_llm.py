@@ -9,7 +9,7 @@ from src.generation.generator import api_llm
 
 class JudgeResult(BaseModel):
     faithfulness: float = Field(
-        description="Score between 0 and 1 indicating whether the answer is supported by the retrieved context."
+        description="Score between 0 and 1 indicating whether the generated answer aligns factually with the golden answer."
     )
 
     relevance: float = Field(
@@ -17,15 +17,15 @@ class JudgeResult(BaseModel):
     )
 
     citation_accuracy: float = Field(
-        description="Score between 0 and 1 indicating whether citations support the answer."
+        description="Score between 0 and 1 indicating accuracy compared to golden answer."
     )
 
     completeness: float = Field(
-        description="Score between 0 and 1 indicating whether important information is missing."
+        description="Score between 0 and 1 indicating whether important information from the golden answer is missing."
     )
 
     hallucination_risk: float = Field(
-        description="Score between 0 and 1 where 0 means no hallucination."
+        description="Score between 0 and 1 where 0 means no hallucination or deviation from the golden answer."
     )
 
     overall_score: float = Field(
@@ -44,7 +44,7 @@ class LLMJudge:
         self.system_prompt = """
 You are an Enterprise RAG Evaluation Judge.
 
-Your ONLY responsibility is to evaluate the generated answer.
+Your ONLY responsibility is to evaluate the generated answer by comparing it against the provided Golden Answer.
 
 Never rewrite the answer.
 
@@ -53,19 +53,19 @@ Evaluate ONLY.
 Evaluation Criteria:
 
 1. Faithfulness
-Is every claim supported by the retrieved context?
+Does the generated answer align factually with the golden answer?
 
 2. Relevance
-Does the answer answer the user's question?
+Does the answer address the user's question?
 
 3. Citation Accuracy
-Do the citations support the answer?
+Is the generated answer as accurate as the golden answer?
 
 4. Completeness
-Is important information missing?
+Is important information from the golden answer missing?
 
 5. Hallucination Risk
-Estimate hallucination probability.
+Estimate hallucination probability based on deviation from the golden answer.
 
 Return ONLY the requested JSON.
 """
@@ -74,9 +74,8 @@ Return ONLY the requested JSON.
         self,
         question: str,
         answer: str,
-        retrieved_context: str,
+        golden_answer: str,
         citations: Optional[List] = None,
-        golden_answer: Optional[str] = None,
     ) -> JudgeResult:
 
         structured_llm = api_llm.with_structured_output(JudgeResult)
@@ -90,10 +89,6 @@ Return ONLY the requested JSON.
 Question:
 
 {question}
-
-Retrieved Context:
-
-{context}
 
 Generated Answer:
 
@@ -126,9 +121,8 @@ Citations:
         result: JudgeResult = chain.invoke(
             {
                 "question": question,
-                "context": retrieved_context,
                 "answer": answer,
-                "golden": golden_answer or "Not Provided",
+                "golden": golden_answer,
                 "citations": citation_text,
             }
         )

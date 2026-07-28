@@ -22,7 +22,7 @@ def get_llm(use_local: bool = False, temperature: float = 0.0):
     """
     if use_local:
         model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
-        llm = ChatOllama(
+        return ChatOllama(
             model=model,
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             temperature=temperature,

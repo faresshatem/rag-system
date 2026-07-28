@@ -36,3 +36,17 @@ class UserResponse(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
+
+class JudgeRequest(BaseModel):
+    question: str
+    answer: str
+    golden_answer: str
+
+class JudgeResponse(BaseModel):
+    faithfulness: float
+    relevance: float
+    citation_accuracy: float
+    completeness: float
+    hallucination_risk: float
+    overall_score: float
+    reasoning: str
