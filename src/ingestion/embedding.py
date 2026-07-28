@@ -19,7 +19,18 @@ class EmbeddingGenerator:
     ):
         if EmbeddingGenerator._model is None:
             print("Loading embedding model...")
-            EmbeddingGenerator._model = SentenceTransformer(model_name)
+            try:
+                EmbeddingGenerator._model = SentenceTransformer(model_name)
+            except Exception as e:
+                if "out of memory" in str(e).lower():
+                    print("CUDA OutOfMemory: Falling back to CPU for embeddings...")
+                    import torch
+                    import gc
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                    EmbeddingGenerator._model = SentenceTransformer(model_name, device="cpu")
+                else:
+                    raise e
             print("Embedding model loaded successfully.")
 
         self.model = EmbeddingGenerator._model

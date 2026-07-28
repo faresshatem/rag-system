@@ -5,6 +5,7 @@ import os
 import shutil
 import uuid
 from src.ingestion.doc_loader import DocumentLoader
+from src.ingestion.classifier import DocumentClassifier
 from src.ingestion.chunker import DocumentChunker
 from src.ingestion.embedding import EmbeddingGenerator
 from src.ingestion.db_connector import QdrantConnector
@@ -13,7 +14,9 @@ from .schemas import QueryRequest, QueryResponse, UserCreate, UserResponse, Toke
 from .database import get_db, User
 from .services import AuthService
 from .rbac import get_current_user_context
-from typing import List
+from src.generation.generator import get_llm
+from langchain_core.messages import HumanMessage
+from typing import Optional, List
 from src.evaluation.judge_llm import judge
 from prometheus_client import Counter, Gauge
 
@@ -109,16 +112,16 @@ async def run_query(payload: QueryRequest, request: Request, user_context: dict 
 
 @router.post("/ingest")
 def ingest_data(
-    domain: str = Form(...),
     file: UploadFile = File(...),
-    user_context: dict = Depends(get_current_user_context)
+    user_context: dict = Depends(get_current_user_context),
+    domain: Optional[str] = Form(None)
 ):
     """
     Task 4 boundary applied to data uploading/ingestion.
     Ensures an HR employee cannot upload documents into the IT namespace.
     Restricts data ingestion strictly to Admin users.
 
-    Pipeline: load -> chunk -> embed -> upload to Qdrant -> verify.
+    Pipeline: load -> classify -> chunk -> embed -> upload to Qdrant -> verify.
     """
     role = user_context.get("role")
     if role != "Admin":
@@ -128,11 +131,7 @@ def ingest_data(
         )
 
     allowed_domains = user_context.get("domains", [])
-    if domain not in allowed_domains:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Write Access Denied: Target namespace {domain} is not in your allowed domains."
-        )
+
 
     # 1. Save uploaded file temporarily
     try:
@@ -156,13 +155,38 @@ def ingest_data(
             detail=f"No content extracted from {file.filename}."
         )
 
+    # Automatically classify domain using LLM (via new dedicated ingestion module)
+    try:
+        full_text = " ".join([d.page_content for d in docs])
+        detected_domain = DocumentClassifier.classify(full_text)
+        
+        if detected_domain not in ["IT", "HR"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Document content is out of bounds (neither IT nor HR)."
+            )
+            
+        if detected_domain not in allowed_domains:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Write Access Denied: Document classified as {detected_domain}, which is not in your allowed domains."
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"LLM Classification failed: {str(e)}"
+        )
+
+
     # 3. Chunk documents
     document_id = str(uuid.uuid4())
     chunker = DocumentChunker()
     chunks = chunker.chunk(
         docs,
         document_id=document_id,
-        domain=domain,
+        domain=detected_domain,
         file_name=file.filename,
     )
 
@@ -188,7 +212,7 @@ def ingest_data(
 
     return {
         "status": "success",
-        "message": f"Ingested {file.filename} into namespace: {domain}",
+        "message": f"Automatically classified and ingested {file.filename} into namespace: {detected_domain}",
         "chunks_uploaded": len(chunks),
         "qdrant_points_count": points_count,
     }

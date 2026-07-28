@@ -34,9 +34,8 @@ export const runQuery = async (query) => {
   return response.data;
 };
 
-export const ingestData = async (domain, file) => {
+export const ingestData = async (file) => {
   const formData = new FormData();
-  formData.append('domain', domain);
   formData.append('file', file);
   
   const response = await api.post('/ingest', formData, {

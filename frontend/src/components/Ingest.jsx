@@ -4,7 +4,7 @@ import { UploadCloud, CheckCircle, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Ingest = () => {
-  const [domain, setDomain] = useState('');
+  
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState(null); // { type: 'success' | 'error', msg: '' }
   const [loading, setLoading] = useState(false);
@@ -19,9 +19,9 @@ const Ingest = () => {
         setLoading(false);
         return;
       }
-      const data = await ingestData(domain, file);
+      const data = await ingestData(file);
       setStatus({ type: 'success', msg: data.message });
-      setDomain('');
+      
       setFile(null);
       // Reset the file input element if needed
       document.getElementById('file-upload').value = '';
@@ -75,19 +75,7 @@ const Ingest = () => {
         className="glass-panel" 
         style={{ padding: '30px' }}
       >
-        <div className="input-group">
-          <label>Target Namespace / Domain</label>
-          <select
-            className="input-field"
-            value={domain}
-            onChange={(e) => setDomain(e.target.value)}
-            required
-          >
-            <option value="" disabled>Select Domain</option>
-            <option value="IT">IT</option>
-            <option value="HR">HR</option>
-          </select>
-        </div>
+
 
         <div className="input-group">
           <label>File Upload (.txt, .pdf, .docx)</label>

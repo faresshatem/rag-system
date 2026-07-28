@@ -6,7 +6,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy import text
 from src.agents.state import AgentState, RetrievedChunk
 from src.generation.router import get_routed_llm
-from src.database.connection import engine
+from src.database.connection import llm_engine
 from redis.asyncio import Redis as AsyncRedis
 
 class SQLQueryOutput(BaseModel):
@@ -70,9 +70,12 @@ async def structured_data_node(state: AgentState) -> dict:
         - AVOID OVER-FILTERING: Ignore conversational filler verbs or implied actions (e.g., "قدمت", "عملت", "applied"). Do NOT add WHERE clauses for dates or specific leave_types unless the user explicitly demands a specific type (like 'SICK leave'). If a user asks generally about their balance or tickets, retrieve ALL records for that user without extra filters.
         - Write ONLY a valid PostgreSQL SELECT statement.
         - If the task mentions a user by name or username, ALWAYS use a JOIN with the 'users' table and filter by 'full_name' using ILIKE.
-        - When searching for Arabic names, translate the FIRST NAME ONLY to English.
-        - Extract the FIRST 4 LETTERS of that translated first name.
-        - Use ONLY these 4 letters in the ILIKE condition. For example, if the user asks for "نورحان فوزي" or "نورهان", extract "Nourhan", take "nour", and write: `users.full_name ILIKE '%nour%'`. Do not include the last name in the SQL query to avoid spelling mismatches.
+        - ARABIC NAMES HANDLING: English spellings of Arabic names vary (e.g., Sara/Sarah, Mohamed/Muhammed). To avoid missing records:
+          1. Translate the FIRST NAME ONLY to English.
+          2. Extract EXACTLY the FIRST 3 LETTERS of that translated first name.
+          3. Use ONLY these 3 letters in the ILIKE condition.
+          4. Example: For "ساره", "سارة", or "Sarah", the first 3 letters are "sar", so write: `users.full_name ILIKE '%sar%'`.
+          5. Example: For "نورحان", extract "Nourhan", take "nou", and write: `users.full_name ILIKE '%nou%'`.
         - Always use `ILIKE` with `%` wildcards on both sides.
         - CRITICAL: You MUST ALWAYS include both the 'id' (from the users table) and the 'full_name' column in your SELECT statement. This ensures the system can verify the user AND passes the exact user ID to subsequent tasks in the execution history.
         - CRITICAL CONDITIONAL LOGIC: If the Task Description contains a condition (e.g., "If the ticket is 'RESOLVED'...") AND you see from the Previous Execution History that this condition is FALSE, you MUST NOT generate a valid SQL query. Instead, output EXACTLY the phrase: "CONDITION_NOT_MET".
@@ -96,8 +99,8 @@ async def structured_data_node(state: AgentState) -> dict:
         else:
             redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
             redis_client = AsyncRedis.from_url(redis_url)
-            # Updated cache key version to flush old poorly translated queries
-            cache_key = f"sql_cache_v1.4:{sql_query}"
+            # Updated cache key version to flush old poorly translated queries and empty result caches
+            cache_key = f"sql_cache_v1.6:{sql_query}"
             
             cached_result = await redis_client.get(cache_key)
             
@@ -109,7 +112,7 @@ async def structured_data_node(state: AgentState) -> dict:
             else:
                 print(f"\n[Structured Agent] Executing SQL: {sql_query}\n")
                 
-                async with engine.begin() as conn:
+                async with llm_engine.begin() as conn:
                     result = await conn.execute(text(sql_query))
                     rows = result.fetchall()
                     keys = result.keys()
@@ -143,11 +146,13 @@ async def structured_data_node(state: AgentState) -> dict:
                     else:
                         summary = f"Retrieved {len(formatted_data)} record(s): {raw_json_str}"
                     
-                data_to_cache = {
-                    "result_text": result_text,
-                    "summary": summary
-                }
-                await redis_client.set(cache_key, json.dumps(data_to_cache), ex=3600)
+                # We should not cache empty results so the agent can immediately detect new data
+                if formatted_data:
+                    data_to_cache = {
+                        "result_text": result_text,
+                        "summary": summary
+                    }
+                    await redis_client.set(cache_key, json.dumps(data_to_cache), ex=3600)
             
     except Exception as e:
         print(f"[Structured Agent] Error: {e}")
