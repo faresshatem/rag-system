@@ -13,10 +13,3 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
-
-celery_app.autodiscover_tasks(
-    ["src.monitoring"],
-    force=True,
-)
-
-import src.monitoring.tasks

@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 
 from src.generation.generator import api_llm
-from src.monitoring.tasks import record_judge_metrics
+
 
 
 class JudgeResult(BaseModel):
@@ -131,16 +131,6 @@ Citations:
                 "golden": golden_answer or "Not Provided",
                 "citations": citation_text,
             }
-        )
-
-        # Send metrics asynchronously using Celery
-        record_judge_metrics.delay(
-            result.overall_score,
-            result.faithfulness,
-            result.relevance,
-            result.completeness,
-            result.citation_accuracy,
-            result.hallucination_risk,
         )
 
         return result
