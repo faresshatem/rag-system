@@ -1,96 +1,112 @@
 ````markdown
 # 🤖 Multi-Agent Enterprise RAG System
 
-> A production-ready **Multi-Agent Retrieval-Augmented Generation (RAG)** platform built with **LangGraph**, **LangChain**, and **FastAPI** to deliver secure, reliable, and source-grounded question answering across enterprise knowledge bases.
+> A production-ready **Multi-Agent Retrieval-Augmented Generation (RAG)** platform that combines **LangGraph**, **LangChain**, and **FastAPI** to deliver secure, explainable, and citation-aware question answering across enterprise knowledge bases.
 
 ---
 
-## 📖 Overview
+# 📖 Overview
 
 This project is an enterprise-grade Retrieval-Augmented Generation (RAG) system designed to answer questions over organizational documents using a collaborative multi-agent architecture.
 
-Unlike traditional RAG pipelines, this system adopts a **Plan-and-Execute** workflow powered by **LangGraph**, where specialized AI agents cooperate to retrieve, verify, and synthesize accurate responses while minimizing hallucinations and enforcing domain-level security.
+Unlike traditional RAG systems, this platform follows a **Plan-and-Execute** workflow powered by **LangGraph**, where specialized agents collaborate to retrieve, verify, and synthesize reliable responses while enforcing domain-level security and minimizing hallucinations.
 
-The platform supports multiple LLM providers, hybrid retrieval techniques, role-based access control (RBAC), citation-aware responses, and scalable deployment using Docker.
+The system combines **hybrid retrieval**, **multi-agent reasoning**, **role-based access control (RBAC)**, **citation-aware generation**, and **web search fallback** to provide accurate and trustworthy answers.
 
 ---
 
-## ✨ Features
+# ✨ Features
 
-### 🤖 Multi-Agent Architecture
+## 🤖 Multi-Agent Architecture
 
 - Supervisor Agent
 - Query Planning Agent
 - Retrieval Agent
 - Verification Agent
 - Synthesis & Citation Agent
+- Web Search Agent
 
-### 🔍 Hybrid Retrieval
+---
 
-- Dense Vector Search
+## 🔍 Hybrid Retrieval
+
+- Dense Vector Search (Qdrant)
 - BM25 Sparse Search
 - Reciprocal Rank Fusion (RRF)
 - Metadata-aware Retrieval
-- Domain-specific Search
+- Domain-based Search
 
-### 🛡️ Security
+---
+
+## 🌐 Intelligent Web Search
+
+- Automatically searches trusted web sources when the requested information is unavailable in the internal knowledge base.
+- Prevents incomplete answers by combining enterprise knowledge with external information when appropriate.
+
+---
+
+## 🛡️ Security
 
 - JWT Authentication
 - Role-Based Access Control (RBAC)
-- Domain Isolation
 - Metadata Filtering
+- Domain Isolation
 - Secure Agent Delegation
 
-### 🧠 AI Capabilities
+---
+
+## 🧠 AI Capabilities
 
 - Multi-step Query Planning
 - Context Verification
 - Automatic Re-query
-- Citation-aware Answer Generation
-- Multi-LLM Routing
+- Citation-aware Response Generation
+- Multi-LLM Support
+- Source Attribution
 
-### 📊 Monitoring
+---
+
+## 📊 Monitoring
 
 - Prometheus Metrics
 - Grafana Dashboards
 - LLM Judge Evaluation
-- Retrieval Performance Monitoring
+- System Performance Monitoring
 
 ---
 
 # 🏗️ System Architecture
 
 ```text
-                        User Query
-                             │
-                             ▼
-                    Supervisor Agent
-                             │
-            ┌────────────────┼────────────────┐
-            ▼                ▼                ▼
-    Planning Agent    Retrieval Agent   Structured Data Agent
-                             │
-                  Dense + BM25 Retrieval
-                             │
-                     Reciprocal Rank Fusion
-                             │
-                             ▼
-                   Verification Agent
-                             │
-                    Context Validation
-                             │
-                             ▼
-                 Synthesis & Citation Agent
-                             │
-                             ▼
-          Final Response + Sources + Confidence
+                              User Query
+                                   │
+                                   ▼
+                          Supervisor Agent
+                                   │
+         ┌───────────────┬───────────────┬────────────────┐
+         ▼               ▼               ▼                ▼
+ Query Planning     Retrieval      Web Search      Verification
+     Agent            Agent           Agent            Agent
+         │               │               │
+         │         Dense + BM25          │
+         │             Search            │
+         │               │               │
+         └───────────────┴──────┬────────┘
+                                ▼
+                   Reciprocal Rank Fusion (RRF)
+                                │
+                                ▼
+                  Synthesis & Citation Agent
+                                │
+                                ▼
+           Final Response + Sources + Confidence
 ```
 
 ---
 
 # 🛠️ Tech Stack
 
-### Backend
+## Backend
 
 - Python 3.12+
 - FastAPI
@@ -99,31 +115,33 @@ The platform supports multiple LLM providers, hybrid retrieval techniques, role-
 - SQLAlchemy
 - Celery
 
-### AI & Retrieval
+## AI & Retrieval
 
 - Sentence Transformers
 - Qdrant
 - BM25
 - Reciprocal Rank Fusion (RRF)
+- Tavily Web Search
 
-### Databases
+## Databases
 
 - PostgreSQL
 - Redis
 - Qdrant
 
-### Frontend
+## Frontend
 
 - React
 - Axios
 - Framer Motion
+- Lucide Icons
 
-### Infrastructure
+## Infrastructure
 
 - Docker
 - Docker Compose
 
-### Monitoring
+## Monitoring
 
 - Prometheus
 - Grafana
@@ -141,6 +159,7 @@ rag-system/
 │   ├── generation/
 │   ├── ingestion/
 │   ├── verification/
+│   ├── web_search/
 │   └── api/
 │
 ├── frontend/
@@ -155,34 +174,35 @@ rag-system/
 
 # ⚙️ Getting Started
 
-## 1. Clone the Repository
+## Clone the Repository
 
 ```bash
 git clone https://github.com/<your-username>/<repository-name>.git
 cd rag-system
 ```
 
-## 2. Create a Virtual Environment
+## Create Virtual Environment
 
 ```bash
 uv venv
 source .venv/bin/activate
 ```
 
-## 3. Install Dependencies
+## Install Dependencies
 
 ```bash
 uv sync
 ```
 
-## 4. Configure Environment Variables
+## Configure Environment Variables
 
 Create a `.env` file:
 
 ```env
 GOOGLE_API_KEY=
-GROQ_API_KEY=
 OPENAI_API_KEY=
+GROQ_API_KEY=
+TAVILY_API_KEY=
 
 QDRANT_URL=http://localhost:6333
 
@@ -195,19 +215,19 @@ REDIS_URL=redis://localhost:6379
 OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-## 5. Start Infrastructure
+## Start Infrastructure
 
 ```bash
 docker compose up -d
 ```
 
-## 6. Run the Backend
+## Run Backend
 
 ```bash
 uvicorn main:app --reload
 ```
 
-## 7. Run the Frontend
+## Run Frontend
 
 ```bash
 cd frontend
@@ -217,33 +237,38 @@ npm start
 
 ---
 
-# 🔄 Retrieval Pipeline
+# 🔄 Retrieval Workflow
 
 ```text
-User Query
-      │
-      ▼
-Metadata Filter
-      │
-      ▼
-Dense Search (Qdrant)
-
-          +
-
-Sparse Search (BM25)
-
-      │
-      ▼
-Reciprocal Rank Fusion
-      │
-      ▼
-Verification Agent
-      │
-      ▼
-Synthesis & Citation Agent
-      │
-      ▼
-Grounded Response + Citations
+                    User Query
+                         │
+                         ▼
+                 Query Planning Agent
+                         │
+                         ▼
+                Metadata Filtering
+                         │
+          ┌──────────────┴──────────────┐
+          ▼                             ▼
+ Dense Vector Search             BM25 Search
+          │                             │
+          └──────────────┬──────────────┘
+                         ▼
+             Reciprocal Rank Fusion
+                         │
+                         ▼
+              Verification Agent
+                         │
+              Context Valid?
+                 │             │
+               Yes            No
+                │              │
+                ▼              ▼
+      Synthesis Agent     Web Search Agent
+                │              │
+                └──────┬───────┘
+                       ▼
+          Final Answer with Citations
 ```
 
 ---
@@ -267,47 +292,48 @@ Grounded Response + Citations
 
 ### Faras
 
-- Chunking Strategy
+- Document Chunking Strategy
 - Embedding Pipeline
 - Celery Background Workers
 - LLM Judge Evaluation
 
 ### Ali
 
-- FastAPI Backend
-- Authentication & RBAC
-- REST APIs
-- Web Search Agent
+- FastAPI Backend Development
+- REST API Design & Implementation
+- Authentication & JWT Authorization
+- Role-Based Access Control (RBAC)
 - Backend Security
+- Web Search Agent
 
 ---
 
 # 🚀 Future Improvements
 
 - GitHub Actions CI/CD
-- AWS Deployment (ECS/EKS)
+- AWS Deployment (ECS / EKS)
 - Kubernetes Support
 - Terraform Infrastructure
 - Streaming Responses
 - Multi-modal Document Support
 - Long-term Agent Memory
-- Advanced Monitoring & Observability
+- Advanced Observability
 
 ---
 
 # 🤝 Contributing
 
-Contributions are welcome! Feel free to fork the repository, create a feature branch, and submit a pull request.
+Contributions are welcome! Feel free to fork the repository, open issues, or submit pull requests.
 
 ---
 
 # 📜 License
 
-This project was developed for educational purposes as part of a Software Engineering / AI Engineering team project.
+This project was developed for educational purposes as part of a Software Engineering & AI Engineering team project.
 
 ---
 
 # ⭐ Acknowledgements
 
-Special thanks to all team members for their collaboration throughout the design and implementation of this project.
+Special thanks to all team members for their collaboration, dedication, and contributions throughout the design and implementation of this project.
 ````
